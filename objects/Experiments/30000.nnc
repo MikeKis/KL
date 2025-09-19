@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf - 8"?>
+<SNN model="superquantized">
+  <RECEPTORS name="R" n="961">
+    <Implementation lib="objects_ArNI"></Implementation>
+  </RECEPTORS>
+  <RECEPTORS name="Target" n="10">
+    <Implementation lib="objects_ArNI"></Implementation>
+  </RECEPTORS>
+  <NETWORK>
+    <Implementation lib="ConvolutionPooling">
+      <args>
+        <input>R</input>
+        <xsize>31</xsize>
+        <ysize>31</ysize>
+	<convolutions>obj.filters.q4.csv</convolutions>
+	<stride>2</stride>
+	<pooling>2</pooling>
+	<state_characteristic_time>10</state_characteristic_time>
+	<out>CPOUT</out>
+	<weight_factor>264385</weight_factor>
+	<sum_pooling></sum_pooling>
+      </args>
+    </Implementation>
+  </NETWORK>
+<NETWORK ncopies="15">
+    <Sections>
+	    <Section name="L">
+	      <props>
+			<n>110</n>
+                        <Structure type="L">                          <!-- NEEDED FOR WTA -->
+                              <dim>22</dim>
+                              <dim>5</dim>
+                        </Structure>
+			<chartime>9</chartime>
+			<minpotential>0</minpotential>
+			<stochastic_stimulation>0</stochastic_stimulation>
+			<weight_inc>-0.000887052</weight_inc>
+			<dopamine_plasticity_time>10</dopamine_plasticity_time>
+			<maxTSSISI>10</maxTSSISI>
+			<stability_resource_change_ratio>0.76721</stability_resource_change_ratio>
+			<minweight>-0.0662741</minweight>
+			<maxweight>0.921382</maxweight>
+			<nsilentsynapses>471</nsilentsynapses>
+  			<threshold_excess_weight_dependent>0.00169196</threshold_excess_weight_dependent>
+	      </props>
+	    </Section>
+	    <Section name="OUT">
+	      <props>
+			<n>5</n>
+	      </props>
+	    </Section>
+	    <Section name="BIASGATE">
+	      <props>
+			<n>5</n>
+	      </props>
+	    </Section>
+	    <Link from="CPOUT" to="L" type="plastic">
+	      <IniResource type="uni">
+			<min>0.071</min>
+			<max>0.071</max>
+	      </IniResource>
+              <probability>1</probability>
+	      <maxnpre>1000</maxnpre>
+	    </Link>
+	    <Link from="L" to="L" policy="all-to-all-sections" type="gating">
+	      <weight>-10</weight>
+	    </Link>
+	    <Link from="Target" to="L" policy="aligned" type="reward">
+	      <weight>0.010981</weight>
+	      <Delay type="uni">
+			    <min>3</min>
+			    <max>3</max>
+	      </Delay>
+	    </Link>
+	    <Link from="L" to="OUT" policy="aligned">
+	      <weight>10</weight>
+	    </Link>
+	    <Link from="OUT" to="BIASGATE" policy="aligned" type="gating">
+	      <weight>-10</weight>
+	    </Link>
+	    <Link from="Target" to="BIASGATE" policy="aligned">
+	      <weight>20</weight>
+	    </Link>
+	    <Link from="BIASGATE" to="L" policy="aligned">
+	      <weight>10</weight>
+	    </Link>
+	    <Link from="Target" to="L" policy="all-to-all">
+	      <weight>-30</weight>   <!--just to reset potential - to zero it forcedly-->
+	      <Delay type="uni">
+			    <min>4</min>
+			    <max>4</max>
+	      </Delay>
+	    </Link>
+    </Sections>
+</NETWORK>
+  <Readout lib="objects_ArNI">
+    <output>OUT</output>
+  </Readout>
+</SNN>
