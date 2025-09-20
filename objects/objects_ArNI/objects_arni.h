@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <sg/sg.h>
+#include <NetworkConfigurator.h>
 
 const int RecordPresentationPeriod = 15;
 const int PicturePresentationTime = 10;
@@ -21,9 +22,6 @@ const int Block = 1;
 
 class DYNAMIC_LIBRARY_EXPORTED_CLASS RasterSpikeSource: public IReceptors
 {
-    boost::asio::io_context               io_ctx;
-    int                                   fd;
-    boost::asio::posix::stream_descriptor stream;
     VECTOR<unsigned char>                 vuc_Raster;
     VECTOR<double>                        vd_State;
     int                                   FrameTactCounter = 0;
@@ -35,20 +33,29 @@ public:
     virtual void Randomize(void) override {}
     virtual void SaveStatus(Serializer &ser) const override {}
     void LoadStatus(Serializer &ser);
-    virtual ~RasterSpikeSource(){stream.close();}
-    size_t tact = 0;
 };
 
 class DYNAMIC_LIBRARY_EXPORTED_CLASS LabelSpikeSource: public IReceptors
 {
-    bool bGenerateSignalsI(unsigned *pfl) const;
+    bool bGenerateSignalsI(unsigned *pfl);
+    int GetPrediction(const VECTOR<PAIR<int, float> > &vpr_Votes) const;
+    boost::asio::io_context            io_ctx;
+    int                                fd;
+    VECTOR<VECTOR<PAIR<int, float> > > vvpr_PredictedStates;
 public:
+    LabelSpikeSource();
     virtual bool bGenerateSignals(unsigned *pfl, int bitoffset) override
     {
         if (bitoffset)
             throw std::runtime_error("LabelSpikeSource -- multiple targets are not allowed");
         return bGenerateSignalsI(pfl);
     }
+    virtual ~LabelSpikeSource(){stream.close();}
+    void ObtainOutputSpikes(const VECTOR<int> &v_Firing);
+    int                                   CurrentClass;
+    size_t                                tact = 0;
+    VECTOR<int>                           vn_PredictionVotes;   // Its size is N target classes X N networks
+    boost::asio::posix::stream_descriptor stream;
 };
 
 #endif // OBJECTS_ARNI_H

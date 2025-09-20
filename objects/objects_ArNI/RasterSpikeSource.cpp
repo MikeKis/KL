@@ -1,21 +1,14 @@
 #include <iostream>
 
-#include "objects_arni_int.h"
 #include "objects_arni.h"
 
 using namespace std;
 namespace asio = boost::asio;
 
-extern int CurrentClass;
+extern LabelSpikeSource *plssG;
 
-RasterSpikeSource::RasterSpikeSource(): stream(io_ctx)
+RasterSpikeSource::RasterSpikeSource()
 {
-    fd = open(fifo_path, O_RDWR);
-    if (fd == -1) {
-        cout << "Error opening FIFO for reading: " << strerror(errno) << std::endl;
-        exit(-40000);
-    }
-    stream.assign(fd);
     vd_State.resize(GetNReceptors(), 0.);
     dStateIncrementFactor = dmaxFrequency / 255;
 }
@@ -28,13 +21,13 @@ bool RasterSpikeSource::bGenerateSignals(unsigned *pfl, int bitoffset)
     }
     fill(pfl, pfl + (GetNReceptors() - 1) / 32 + 1, 0);
     if (!FrameTactCounter) {
-        size_t bytes_read = asio::read(stream, asio::buffer(vuc_Raster));
+        size_t bytes_read = asio::read(plssG->stream, asio::buffer(vuc_Raster));
         if (bytes_read != GetNReceptors()) {
             cout << "Error reading FIFO\n";
             exit(-40000);
         }
-        bytes_read = asio::read(stream, asio::buffer(&CurrentClass, sizeof(CurrentClass)));
-        if (bytes_read != sizeof(CurrentClass)) {
+        bytes_read = asio::read(plssG->stream, asio::buffer(&plssG->CurrentClass, sizeof(plssG->CurrentClass)));
+        if (bytes_read != sizeof(plssG->CurrentClass)) {
             cout << "Error reading FIFO\n";
             exit(-40000);
         }
