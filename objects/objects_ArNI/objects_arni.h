@@ -3,83 +3,12 @@
 
 #define FOR_LINUX
 
+#include <boost/asio.hpp>
+#include <boost/asio/posix/stream_descriptor.hpp>
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <sg/sg.h>
-
-class DYNAMIC_LIBRARY_EXPORTED_CLASS RasterSpikeSource: public IReceptors
-{
-    size_t tact = 0;
-
-
-
-
-    VECTOR<VECTOR<unsigned> > vvfl_InputSignal;
-    VECTOR<unsigned>          vfl_InputSignal;
-    VECTOR<unsigned char>     vuc_Raster;
-    enum mode
-    {
-        normal,
-        repetitive,
-        endless,
-        invalid
-    }                         mod;
-    VECTOR<STRING>            vstr_meanings;
-    size_t                    HistoryLength;
-    enum type
-    {
-        plain_record_binary,
-        plain_record_text,
-        text_values,
-        picture,
-        no_input
-    }                         typ = plain_record_text;
-    int						  ntactperPicture = 0;
-    int                       FrameTactCounter = 0;
-    VECTOR<double>            vd_State;
-    double                    dStateIncrementFactor;
-    double                    dState = 0.;
-    double                    dFrequencyMultiplier = 1.;
-    Rand                      rng;
-    float                     rNoise = 0.F;
-    int                       Period = 0;
-
-    void GetSpikesfromImage(int nPixels, VECTOR<unsigned> &vfl_InpSig);
-    void DropSpikes(int nPixels, VECTOR<unsigned> &vfl_InpSig);
-    void AddNoise(int nPixels, VECTOR<unsigned> &vfl_InpSig);
-    void GetSpikesfromTextValuesFile(
-        STRING strSource,
-        int RecordPresentationTime,
-        int RecordPresentationPeriod,
-        int nReceptiveFields,
-        unsigned ShuffleSeed,
-        int BlockSize,
-        PAIR<int, int> pindind_GaussianCalibtrationRecords,   // It is assumed that this is the record range used for learning - so that only records in this
-        // range are shuffled.
-        const VECTOR<pugi::xml_node> &vxn_InputVariables
-        );
-
-public:
-    RasterSpikeSource() {};
-    virtual bool bGenerateSignals(unsigned *pfl, int bitoffset) override;
-
-
-
-    virtual void Randomize(void) override;
-    virtual void SaveStatus(Serializer &ser) const override;
-    virtual void GetMeanings(VECTOR<STRING> &vstr_Meanings) const override
-    {
-        if (vstr_meanings.empty())
-            IReceptors::GetMeanings(vstr_Meanings);
-        else vstr_Meanings = vstr_meanings;
-    }
-    void LoadStatus(Serializer &ser);
-    virtual ~FileSpikeSource() = default;
-};
-
-class DYNAMIC_LIBRARY_EXPORTED_CLASS LabelSpikeSource: public IReceptors
-{
-
-};
-
 
 const int RecordPresentationPeriod = 15;
 const int PicturePresentationTime = 10;
@@ -89,5 +18,37 @@ const double dmaxFrequency = 1.;
 const unsigned ShuffleSeed = 0;
 const bool bShuffle = false;
 const int Block = 1;
+
+class DYNAMIC_LIBRARY_EXPORTED_CLASS RasterSpikeSource: public IReceptors
+{
+    boost::asio::io_context               io_ctx;
+    int                                   fd;
+    boost::asio::posix::stream_descriptor stream;
+    VECTOR<unsigned char>                 vuc_Raster;
+    VECTOR<double>                        vd_State;
+    int                                   FrameTactCounter = 0;
+    double                                dStateIncrementFactor;
+    void GetSpikesfromImage(unsigned *pfl);
+public:
+    RasterSpikeSource();
+    virtual bool bGenerateSignals(unsigned *pfl, int bitoffset) override;
+    virtual void Randomize(void) override {}
+    virtual void SaveStatus(Serializer &ser) const override {}
+    void LoadStatus(Serializer &ser);
+    virtual ~RasterSpikeSource(){stream.close();}
+    size_t tact = 0;
+};
+
+class DYNAMIC_LIBRARY_EXPORTED_CLASS LabelSpikeSource: public IReceptors
+{
+    bool bGenerateSignalsI(unsigned *pfl) const;
+public:
+    virtual bool bGenerateSignals(unsigned *pfl, int bitoffset) override
+    {
+        if (bitoffset)
+            throw std::runtime_error("LabelSpikeSource -- multiple targets are not allowed");
+        return bGenerateSignalsI(pfl);
+    }
+};
 
 #endif // OBJECTS_ARNI_H

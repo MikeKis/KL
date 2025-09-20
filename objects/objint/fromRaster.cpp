@@ -5,19 +5,14 @@
 using namespace std;
 using namespace cv;
 
-string strGetTextfromRaster(const Mat &mat)
+boost::asio::mutable_buffer fromRaster(const cv::Mat &mat)
 {
-    string strret;
+    vector<unsigned char> vuc_;
     auto y = mat.begin<double>();
     while (y != mat.end<double>()) {
         const unsigned char uc = (unsigned char)*y;
-        if (uc <= 222)
-            strret += uc + 33;
-        else {
-            strret += ' ';
-            strret += uc;
-        }
+        vuc_.push_back(uc);
         ++y;
     }
-    return strret;
+    return boost::asio::buffer(vuc_);
 }

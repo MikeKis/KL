@@ -6,7 +6,7 @@ include_directories( ${OpenCV_INCLUDE_DIRS} )
 # Source groups
 ################################################################################
 set(SRC
-    "GetTextfromRaster.cpp"
+    "fromRaster.cpp"
     "objint.cpp"
     "objpre.cpp"
     "objlea.cpp"

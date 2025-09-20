@@ -17,4 +17,3 @@ RECEPTORS_SET_PARAMETERS(pchMyReceptorSectionName, nReceptors, xn)
         exit(-1);
     }
 }
-
