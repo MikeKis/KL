@@ -32,19 +32,15 @@ void trainOnRoi(Mat &receivedRoi, int classId)
 int predictOnRoi(Mat &receivedRoi)
 {
     cv::Mat resizedRoi; // frame for inference (31 x 31)
-    cv::resize(receivedRoi, resizedRoi, cv::Size(31, 31));
-
-    // Put spike neural network inference code here
-    // ...
-
-    int predictedClass = rand() % 10;  // Replace predictedClass variable with actual prediction
-
+    Preprocess(receivedRoi, resizedRoi);
+    int predictedClass = Inference(resizedRoi);
     cout << "Predicted class: " << predictedClass << endl;
     return predictedClass;
 }
 
 string processFrame(int boxCount, int roiHeight, int trainingMode, int classId, const Mat &receivedImage)
 {
+    static bool bItWasTraining = true;
     string predictedClasses = "";
 
     for (int boxIndex = 0; boxIndex < boxCount; ++boxIndex)
@@ -53,15 +49,14 @@ string processFrame(int boxCount, int roiHeight, int trainingMode, int classId, 
         int x2 = x1 + roiHeight;
         Mat receivedRoi = receivedImage(Range(0, roiHeight), Range(x1, x2));
 
-        if (trainingMode == 1)
-        {
+        if (trainingMode == 1) {
             trainOnRoi(receivedRoi, classId);
             framesTrained++;
             imshow("Training frame (C++)", receivedRoi);
             waitKey(100);  // change to 1 ms after the training implementation
-        }
-        else
-        {
+        } else {
+            if (bItWasTraining)
+                FixNetwork();
             framesTrained = 0;
             int predictedClass = predictOnRoi(receivedRoi);
             predictedClasses.append(to_string(predictedClass) + ",");
@@ -69,6 +64,7 @@ string processFrame(int boxCount, int roiHeight, int trainingMode, int classId, 
             waitKey(1);
         }
     }
+    bItWasTraining = trainingMode == 1;
     return predictedClasses;
 }
 
@@ -97,29 +93,31 @@ int main()
         int roiHeight = receiveInt(pull_socket);
         int classId = receiveInt(pull_socket);
         int trainingMode = receiveInt(pull_socket);
+        if (trainingMode) {
+            trainingMode = 2 - trainingMode;
+            cout << "Received box count: " << boxCount << endl;
+            cout << "Received roi height: " << roiHeight << endl;
+            cout << "Received class id for training: " << classId << endl;
+            cout << "Received training mode: " << trainingMode << endl;
 
-        cout << "Received box count: " << boxCount << endl;
-        cout << "Received roi height: " << roiHeight << endl;
-        cout << "Received class id for training: " << classId << endl;
-        cout << "Received training mode: " << trainingMode << endl;
+            int frameWidth = roiHeight * boxCount;
+            zmq::message_t imageMessage;
+            pull_socket.recv(&imageMessage);
+            Mat receivedImage(roiHeight, frameWidth, CV_8U, imageMessage.data());
 
-        int frameWidth = roiHeight * boxCount;
-        zmq::message_t imageMessage;
-        pull_socket.recv(&imageMessage);
-        Mat receivedImage(roiHeight, frameWidth, CV_8U, imageMessage.data());
+            auto startTimeProcessing = high_resolution_clock::now();
+            string predictedClasses = processFrame(boxCount, roiHeight, trainingMode, classId, receivedImage);
+            auto stopTime = high_resolution_clock::now();
 
-        auto startTimeProcessing = high_resolution_clock::now();
-        string predictedClasses = processFrame(boxCount, roiHeight, trainingMode, classId, receivedImage);
-        auto stopTime = high_resolution_clock::now();
+            auto processingTime = duration_cast<milliseconds>(stopTime - startTimeProcessing).count();
+            auto totalLatency = duration_cast<milliseconds>(stopTime - startTimeLoop).count();
 
-        auto processingTime = duration_cast<milliseconds>(stopTime - startTimeProcessing).count();
-        auto totalLatency = duration_cast<milliseconds>(stopTime - startTimeLoop).count();
+            cout << "All predicted classes to send: " << predictedClasses << endl;
+            cout << "Total latency: " << totalLatency << endl;
+            cout << "Processing time: " << processingTime << endl;
 
-        cout << "All predicted classes to send: " << predictedClasses << endl;
-        cout << "Total latency: " << totalLatency << endl;
-        cout << "Processing time: " << processingTime << endl;
-
-        sendResults(push_socket, predictedClasses, processingTime, totalLatency);
+            sendResults(push_socket, predictedClasses, processingTime, totalLatency);
+        }
     }
     return 0;
 }

@@ -39,8 +39,8 @@ void Learn(const cv::Mat &mat, int ClassId)
             }
             stream.assign(fd);
             upchi.reset(new boost::process::child("ArNIGPU", vstr_Arguments, boost::process::std_err > ips, boost::process::std_in < ops));
-            asio::write(stream, fromRaster(mat));
             asio::write(stream, asio::buffer(&ClassId, sizeof(ClassId)));
+            asio::write(stream, fromRaster(mat));
         } catch (std::exception &x) {
             cout << "objint threw the exception \"" << x.what() <<"\nArNIGPU arguments:\n";
             for (auto z: vstr_Arguments)
@@ -63,8 +63,8 @@ void Learn(const cv::Mat &mat, int ClassId)
         if (bytes_available) {
             int i;
             asio::read(stream, asio::buffer(&i, sizeof(int)));
-            asio::write(stream, fromRaster(mat));
             asio::write(stream, asio::buffer(&ClassId, sizeof(ClassId)));
+            asio::write(stream, fromRaster(mat));
         }
     }
 }

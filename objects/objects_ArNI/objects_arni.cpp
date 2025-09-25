@@ -20,6 +20,17 @@ RECEPTORS_SET_PARAMETERS(pchMyReceptorSectionName, nReceptors, xn)
 }
 
 DYNAMIC_LIBRARY_ENTRY_POINT IReceptors *LoadStatus(Serializer &ser) {return new LabelSpikeSource;}   // just nothing
+
+NETWORK_SET_PARAMETERS(xn, NetworkCopy, pchSectionPrefix)
+{
+
+}
+
+NETWORK_MODIFY(CurrentTact)
+{
+
+}
+
 READOUT_SET_PARAMETERS(ExperimentId, tactTermination, nOutputNeurons, xn){plssG->vn_PredictionVotes.resize(nOutputNeurons, 0);}
 
 READOUT_OBTAIN_SPIKES(v_Firing)
