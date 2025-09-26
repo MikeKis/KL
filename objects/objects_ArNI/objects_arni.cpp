@@ -5,12 +5,13 @@
 using namespace std;
 
 LabelSpikeSource *plssG = NULL;
+bool bCommandCopyNetwork = false;
 
 RECEPTORS_SET_PARAMETERS(pchMyReceptorSectionName, nReceptors, xn)
 {
     if (!strcmp(pchMyReceptorSectionName, "R")) {
         plssG = new LabelSpikeSource;
-        return new RasterSpikeSource;
+        return new RasterSpikeSource(xn);
     } else if (!strcmp(pchMyReceptorSectionName, "Target"))
         return plssG;
     else {
@@ -20,15 +21,14 @@ RECEPTORS_SET_PARAMETERS(pchMyReceptorSectionName, nReceptors, xn)
 }
 
 DYNAMIC_LIBRARY_ENTRY_POINT IReceptors *LoadStatus(Serializer &ser) {return new LabelSpikeSource;}   // just nothing
-
-NETWORK_SET_PARAMETERS(xn, NetworkCopy, pchSectionPrefix)
-{
-
-}
+NETWORK_SET_PARAMETERS(xn, NetworkCopy, pchSectionPrefix){}
 
 NETWORK_MODIFY(CurrentTact)
 {
-
+    if (!bCommandCopyNetwork)
+        return false;
+    inc.ScheduleSavingNetwork(CurrentTact + 1, "obj.F.nns");
+    return false;
 }
 
 READOUT_SET_PARAMETERS(ExperimentId, tactTermination, nOutputNeurons, xn){plssG->vn_PredictionVotes.resize(nOutputNeurons, 0);}
@@ -39,5 +39,8 @@ READOUT_OBTAIN_SPIKES(v_Firing)
     return true;
 }
 
-READOUT_FINALIZE(OriginalTerminationCode, filGenLog) {return 0;}
+READOUT_FINALIZE(OriginalTerminationCode, filGenLog)
+{
+    return 0;
+}
 DYNAMIC_LIBRARY_ENTRY_POINT void Serialize(Serializer &ser, bool bSave) {}

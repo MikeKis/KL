@@ -11,7 +11,13 @@ using namespace std;
 using namespace cv;
 using namespace chrono;
 
+extern NamedPipe npLearning;
+extern NamedPipe npInference;
+
+NamedPipe *pnpCurrent = NULL;
+
 int framesTrained = 0;
+int LastPredictedClass = -1;
 
 int receiveInt(zmq::socket_t &socket)
 {
@@ -29,50 +35,55 @@ void trainOnRoi(Mat &receivedRoi, int classId)
     putText(receivedRoi, to_string(framesTrained), Point(10, 30), FONT_HERSHEY_SIMPLEX, 1.0, Scalar(255, 255, 255), 2);
 }
 
-int predictOnRoi(Mat &receivedRoi)
+void predictOnRoi(Mat &receivedRoi)
 {
     cv::Mat resizedRoi; // frame for inference (31 x 31)
     Preprocess(receivedRoi, resizedRoi);
-    int predictedClass = Inference(resizedRoi);
-    cout << "Predicted class: " << predictedClass << endl;
-    return predictedClass;
+    Inference(resizedRoi);
+    cout << "Predicted class: " << LastPredictedClass << endl;
 }
 
-string processFrame(int boxCount, int roiHeight, int trainingMode, int classId, const Mat &receivedImage)
+void processFrame(int boxCount, int roiHeight, int trainingMode, int classId, const Mat &receivedImage)
 {
     static bool bItWasTraining = true;
-    string predictedClasses = "";
+    int bytes_available = pnpCurrent ? pnpCurrent->DataAvailable() : -1;
+    if (bytes_available) {
+        if (bytes_available > 0)
+            pnpCurrent->read(LastPredictedClass);
 
-    for (int boxIndex = 0; boxIndex < boxCount; ++boxIndex)
-    {
-        int x1 = boxIndex * roiHeight;
-        int x2 = x1 + roiHeight;
-        Mat receivedRoi = receivedImage(Range(0, roiHeight), Range(x1, x2));
+        for (int boxIndex = 0; boxIndex < boxCount; ++boxIndex)
+        {
+            int x1 = boxIndex * roiHeight;
+            int x2 = x1 + roiHeight;
+            Mat receivedRoi = receivedImage(Range(0, roiHeight), Range(x1, x2));
 
-        if (trainingMode == 1) {
-            trainOnRoi(receivedRoi, classId);
-            framesTrained++;
-            imshow("Training frame (C++)", receivedRoi);
-            waitKey(100);  // change to 1 ms after the training implementation
-        } else {
-            if (bItWasTraining)
-                FixNetwork();
-            framesTrained = 0;
-            int predictedClass = predictOnRoi(receivedRoi);
-            predictedClasses.append(to_string(predictedClass) + ",");
-            imshow("Inference frame (C++)", receivedRoi);
-            waitKey(1);
+            if (trainingMode == 1) {
+                trainOnRoi(receivedRoi, classId);
+                framesTrained++;
+                imshow("Training frame (C++)", receivedRoi);
+                waitKey(100);  // change to 1 ms after the training implementation
+                pnpCurrent = &npLearning;
+            } else {
+                if (bItWasTraining)
+                    FixNetwork();
+                framesTrained = 0;
+                predictOnRoi(receivedRoi);
+                imshow("Inference frame (C++)", receivedRoi);
+                waitKey(1);
+                pnpCurrent = &npInference;
+            }
         }
+        bItWasTraining = trainingMode == 1;
     }
-    bItWasTraining = trainingMode == 1;
-    return predictedClasses;
 }
 
-void sendResults(zmq::socket_t &push_socket, const string &predictedClasses, long processingTime, long totalLatency)
+void sendResults(zmq::socket_t &push_socket, long processingTime, long totalLatency)
 {
     string performance = to_string(processingTime);
     string latency = to_string(totalLatency);
-    push_socket.send(predictedClasses.c_str(), predictedClasses.size(), ZMQ_NOBLOCK);
+    stringstream ss;
+    ss << LastPredictedClass;
+    push_socket.send(ss.str().c_str(), ss.str().size(), ZMQ_NOBLOCK);
     push_socket.send(latency.c_str(), latency.size(), ZMQ_NOBLOCK);
     push_socket.send(performance.c_str(), performance.size(), ZMQ_NOBLOCK);
 }
@@ -106,17 +117,17 @@ int main()
             Mat receivedImage(roiHeight, frameWidth, CV_8U, imageMessage.data());
 
             auto startTimeProcessing = high_resolution_clock::now();
-            string predictedClasses = processFrame(boxCount, roiHeight, trainingMode, classId, receivedImage);
+            processFrame(boxCount, roiHeight, trainingMode, classId, receivedImage);
             auto stopTime = high_resolution_clock::now();
 
             auto processingTime = duration_cast<milliseconds>(stopTime - startTimeProcessing).count();
             auto totalLatency = duration_cast<milliseconds>(stopTime - startTimeLoop).count();
 
-            cout << "All predicted classes to send: " << predictedClasses << endl;
+            cout << "Current class to send: " << LastPredictedClass << endl;
             cout << "Total latency: " << totalLatency << endl;
             cout << "Processing time: " << processingTime << endl;
 
-            sendResults(push_socket, predictedClasses, processingTime, totalLatency);
+            sendResults(push_socket, processingTime, totalLatency);
         }
     }
     return 0;

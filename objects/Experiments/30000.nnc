@@ -2,6 +2,9 @@
 <SNN model="superquantized">
     <RECEPTORS name="R" n="961">
 	<Implementation lib="objects_ArNI"></Implementation>
+    	    <args>
+    		<mode>learning</mode>
+    	    </args>
     </RECEPTORS>
     <RECEPTORS name="Target" n="10">
 	<Implementation lib="objects_ArNI"></Implementation>

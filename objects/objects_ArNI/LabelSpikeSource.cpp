@@ -1,20 +1,12 @@
 #include <iostream>
 
 #include "objects_arni.h"
-#include "objects_arni_int.h"
 
 using namespace std;
-namespace asio = boost::asio;
 
-LabelSpikeSource::LabelSpikeSource(): stream(io_ctx)
-{
-    fd = open(pchArNI_fifo_path, O_RDWR);
-    if (fd == -1) {
-        cout << "Error opening FIFO for reading: " << strerror(errno) << std::endl;
-        exit(-40000);
-    }
-    stream.assign(fd);
-}
+NamedPipe np;
+
+LabelSpikeSource::LabelSpikeSource(){}
 
 bool LabelSpikeSource::bGenerateSignalsI(unsigned *pfl)
 {
@@ -63,8 +55,8 @@ void LabelSpikeSource::ObtainOutputSpikes(const VECTOR<int> &v_Firing)
             if (vr_perNetworkPredictionVotes[_i])
                 vpr_.push_back(pair<int, float>(_i, vr_perNetworkPredictionVotes[_i]));
         vvpr_PredictedStates.push_back(vpr_);
-        int pred = GetPrediction(vpr_);   // in fact it is not used in training mode
-        asio::write(stream, asio::buffer(&pred, sizeof(pred)));
+        int pred = GetPrediction(vpr_);   // it is not used in training mode
+        np.write(pred);
         fill(vn_PredictionVotes.begin(), vn_PredictionVotes.end(), 0);
     }
     ++tact;

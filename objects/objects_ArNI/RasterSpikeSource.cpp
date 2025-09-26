@@ -3,12 +3,14 @@
 #include "objects_arni.h"
 
 using namespace std;
-namespace asio = boost::asio;
 
 extern LabelSpikeSource *plssG;
+extern bool bCommandCopyNetwork;
+extern NamedPipe np;
 
-RasterSpikeSource::RasterSpikeSource()
+RasterSpikeSource::RasterSpikeSource(const pugi::xml_node &xn)
 {
+    np.open(!strcmp(xn.child_value("mode"), "learning") ? ARNI_FIFO_PATH_LEARNING : ARNI_FIFO_PATH_INFERENCE);
     vd_State.resize(GetNReceptors(), 0.);
     dStateIncrementFactor = dmaxFrequency / 255;
 }
@@ -21,19 +23,19 @@ bool RasterSpikeSource::bGenerateSignals(unsigned *pfl, int bitoffset)
     }
     fill(pfl, pfl + (GetNReceptors() - 1) / 32 + 1, 0);
     if (!FrameTactCounter) {
-        int i;
-        size_t bytes_read = asio::read(plssG->stream, asio::buffer(&i, sizeof(i)));
-        if (bytes_read != sizeof(i)) {
-            cout << "Error reading FIFO\n";
-            exit(-40000);
-        }
+        int i = 0;
+        if (np.strname == ARNI_FIFO_PATH_LEARNING)
+            np.read(i);
         if (i >= 0) {
             plssG->CurrentClass = i;
-            bytes_read = asio::read(plssG->stream, asio::buffer(vuc_Raster));
+            size_t bytes_read = np.read(vuc_Raster);
             if (bytes_read != GetNReceptors()) {
                 cout << "Error reading FIFO\n";
                 exit(-40000);
             }
+        } else {
+            fill(vuc_Raster.begin(), vuc_Raster.end(), 0);
+            bCommandCopyNetwork = true;
         }
         FrameTactCounter = RecordPresentationPeriod;
     }
