@@ -1,39 +1,40 @@
 <?xml version="1.0" encoding="utf - 8"?>
 <SNN model="superquantized">
-    <RECEPTORS name="R" n="961">
-	<Implementation lib="objects_ArNI"></Implementation>
+  <RECEPTORS name="R" n="961">
+	<Implementation lib="objects_ArNI">
     	    <args>
     		<mode>learning</mode>
     	    </args>
-    </RECEPTORS>
-    <RECEPTORS name="Target" n="10">
-	<Implementation lib="objects_ArNI"></Implementation>
-    </RECEPTORS>
-    <NETWORK>
-	<Implementation lib="ConvolutionPooling">
-    	    <args>
-    		<input>R</input>
-    		<xsize>31</xsize>
-    		<ysize>31</ysize>
-		<convolutions>obj.filters.q4.csv</convolutions>
-		<stride>2</stride>
-		<pooling>2</pooling>
-		<state_characteristic_time>10</state_characteristic_time>
-		<out>CPOUT</out>
-		<weight_factor>264385</weight_factor>
-		<sum_pooling></sum_pooling>
-    	    </args>
 	</Implementation>
-    </NETWORK>
-    <NETWORK ncopies="15">
-	<Sections>
+  </RECEPTORS>
+  <RECEPTORS name="Target" n="10">
+	<Implementation lib="objects_ArNI"></Implementation>
+  </RECEPTORS>
+  <NETWORK>
+    <Implementation lib="ConvolutionPooling">
+      <args>
+        <input>R</input>
+        <xsize>31</xsize>
+        <ysize>31</ysize>
+	<convolutions>obj.filters.q4.csv</convolutions>
+	<stride>2</stride>
+	<pooling>2</pooling>
+	<state_characteristic_time>10</state_characteristic_time>
+	<out>CPOUT</out>
+	<weight_factor>264385</weight_factor>
+	<sum_pooling></sum_pooling>
+      </args>
+    </Implementation>
+  </NETWORK>
+<NETWORK ncopies="15">
+    <Sections>
 	    <Section name="L">
 	      <props>
-			<n>110</n>
-                        <Structure type="L">                          <!-- NEEDED FOR WTA -->
-                              <dim>22</dim>
-                              <dim>5</dim>
-                        </Structure>
+			<n>220</n>
+          <Structure type="L">                          <!-- NEEDED FOR WTA -->
+                <dim>22</dim>
+                <dim>10</dim>
+          </Structure>
 			<chartime>9</chartime>
 			<minpotential>0</minpotential>
 			<stochastic_stimulation>0</stochastic_stimulation>
@@ -49,12 +50,12 @@
 	    </Section>
 	    <Section name="OUT">
 	      <props>
-			<n>5</n>
+			    <n>10</n>
 	      </props>
 	    </Section>
 	    <Section name="BIASGATE">
 	      <props>
-			<n>5</n>
+			    <n>10</n>
 	      </props>
 	    </Section>
 	    <Link from="CPOUT" to="L" type="plastic">
@@ -94,8 +95,8 @@
 			    <max>4</max>
 	      </Delay>
 	    </Link>
-	</Sections>
-    </NETWORK>
+    </Sections>
+</NETWORK>
     <NETWORK>
 	<Implementation lib="objects_ArNI">
     	    <args></args>

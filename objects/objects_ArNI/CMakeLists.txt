@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(../../../E/ArNI)
+link_directories(../../../E/ArNI/lib)
 
 add_library(objects_ArNI SHARED
 
@@ -15,6 +16,7 @@ add_library(objects_ArNI SHARED
   objects_arni_int.h
   GetSpikesfromImage.cpp
   LabelSpikeSource.cpp
+  ../pugixml-1.10/src/pugixml.cpp
 )
 
 target_compile_definitions(objects_ArNI PRIVATE OBJECTS_ARNI_LIBRARY)

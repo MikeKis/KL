@@ -1,10 +1,8 @@
-#include <iostream>
-
 #include "objects_arni.h"
 
 using namespace std;
 
-NamedPipe np;
+NamedPipe2directional np2;
 
 LabelSpikeSource::LabelSpikeSource(){}
 
@@ -56,7 +54,7 @@ void LabelSpikeSource::ObtainOutputSpikes(const VECTOR<int> &v_Firing)
                 vpr_.push_back(pair<int, float>(_i, vr_perNetworkPredictionVotes[_i]));
         vvpr_PredictedStates.push_back(vpr_);
         int pred = GetPrediction(vpr_);   // it is not used in training mode
-        np.write(pred);
+        np2.write(pred);
         fill(vn_PredictionVotes.begin(), vn_PredictionVotes.end(), 0);
     }
     ++tact;

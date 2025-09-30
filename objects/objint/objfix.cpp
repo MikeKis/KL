@@ -1,6 +1,6 @@
 #include "objint.h"
 
-extern NamedPipe npLearning;
+extern NamedPipe2directional np2Learning;
 extern std::unique_ptr<boost::process::child> upchi;
 
 void FixNetwork()
@@ -10,6 +10,6 @@ void FixNetwork()
         upchi.release();
     }
     int i = -1;
-    npLearning.write(i);
-    npLearning.read(i);
+    np2Learning.write(i);
+    np2Learning.read(i);
 }

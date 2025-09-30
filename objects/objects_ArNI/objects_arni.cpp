@@ -11,13 +11,14 @@ RECEPTORS_SET_PARAMETERS(pchMyReceptorSectionName, nReceptors, xn)
 {
     if (!strcmp(pchMyReceptorSectionName, "R")) {
         plssG = new LabelSpikeSource;
-        return new RasterSpikeSource(xn);
-    } else if (!strcmp(pchMyReceptorSectionName, "Target"))
-        return plssG;
-    else {
-        cout << "objects_ArNI -- unknown section name: " << pchMyReceptorSectionName << endl;
-        exit(-1);
+        return new RasterSpikeSource(xn, nReceptors);
     }
+    if (!strcmp(pchMyReceptorSectionName, "Target")) {
+        plssG->SetNReceptors(nReceptors);
+        return plssG;
+    }
+    cout << "objects_ArNI -- unknown section name: " << pchMyReceptorSectionName << endl;
+    exit(-1);
 }
 
 DYNAMIC_LIBRARY_ENTRY_POINT IReceptors *LoadStatus(Serializer &ser) {return new LabelSpikeSource;}   // just nothing

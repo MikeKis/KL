@@ -5,7 +5,7 @@
 using namespace std;
 using namespace cv;
 
-boost::asio::mutable_buffer fromRaster(const cv::Mat &mat)
+std::vector<unsigned char> vuc_fromRaster(const cv::Mat &mat)
 {
     vector<unsigned char> vuc_;
     auto y = mat.begin<double>();
@@ -14,5 +14,5 @@ boost::asio::mutable_buffer fromRaster(const cv::Mat &mat)
         vuc_.push_back(uc);
         ++y;
     }
-    return boost::asio::buffer(vuc_);
+    return vuc_;
 }

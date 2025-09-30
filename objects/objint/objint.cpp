@@ -11,10 +11,10 @@ using namespace std;
 using namespace cv;
 using namespace chrono;
 
-extern NamedPipe npLearning;
-extern NamedPipe npInference;
+extern NamedPipe2directional np2Learning;
+extern NamedPipe2directional np2Inference;
 
-NamedPipe *pnpCurrent = NULL;
+NamedPipe2directional *pnp2Current = NULL;
 
 int framesTrained = 0;
 int LastPredictedClass = -1;
@@ -46,10 +46,12 @@ void predictOnRoi(Mat &receivedRoi)
 void processFrame(int boxCount, int roiHeight, int trainingMode, int classId, const Mat &receivedImage)
 {
     static bool bItWasTraining = true;
-    int bytes_available = pnpCurrent ? pnpCurrent->DataAvailable() : -1;
+    int bytes_available = pnp2Current ? pnp2Current->DataAvailable() : -1;
     if (bytes_available) {
-        if (bytes_available > 0)
-            pnpCurrent->read(LastPredictedClass);
+        if (bytes_available > 0) {
+            pnp2Current->read(LastPredictedClass);
+            cout << "Response received from ArNIGPU: " << LastPredictedClass << endl;
+        }
 
         for (int boxIndex = 0; boxIndex < boxCount; ++boxIndex)
         {
@@ -62,7 +64,7 @@ void processFrame(int boxCount, int roiHeight, int trainingMode, int classId, co
                 framesTrained++;
                 imshow("Training frame (C++)", receivedRoi);
                 waitKey(100);  // change to 1 ms after the training implementation
-                pnpCurrent = &npLearning;
+                pnp2Current = &np2Learning;
             } else {
                 if (bItWasTraining)
                     FixNetwork();
@@ -70,7 +72,7 @@ void processFrame(int boxCount, int roiHeight, int trainingMode, int classId, co
                 predictOnRoi(receivedRoi);
                 imshow("Inference frame (C++)", receivedRoi);
                 waitKey(1);
-                pnpCurrent = &npInference;
+                pnp2Current = &np2Inference;
             }
         }
         bItWasTraining = trainingMode == 1;
@@ -97,6 +99,8 @@ int main()
     pull_socket.connect("tcp://127.0.0.1:8001");
     push_socket.connect("tcp://127.0.0.1:8002");
 
+    cout << "objint started\n";
+
     for (;;)
     {
         auto startTimeLoop = high_resolution_clock::now();
@@ -104,31 +108,31 @@ int main()
         int roiHeight = receiveInt(pull_socket);
         int classId = receiveInt(pull_socket);
         int trainingMode = receiveInt(pull_socket);
+        // cout << "Received box count: " << boxCount << endl;
+        // cout << "Received roi height: " << roiHeight << endl;
+        // cout << "Received class id for training: " << classId << endl;
+        // cout << "Received training mode: " << trainingMode << endl;
+
+        int frameWidth = roiHeight * boxCount;
+        zmq::message_t imageMessage;
+        pull_socket.recv(&imageMessage);
+        Mat receivedImage(roiHeight, frameWidth, CV_8U, imageMessage.data());
+
+        auto startTimeProcessing = high_resolution_clock::now();
         if (trainingMode) {
             trainingMode = 2 - trainingMode;
-            cout << "Received box count: " << boxCount << endl;
-            cout << "Received roi height: " << roiHeight << endl;
-            cout << "Received class id for training: " << classId << endl;
-            cout << "Received training mode: " << trainingMode << endl;
-
-            int frameWidth = roiHeight * boxCount;
-            zmq::message_t imageMessage;
-            pull_socket.recv(&imageMessage);
-            Mat receivedImage(roiHeight, frameWidth, CV_8U, imageMessage.data());
-
-            auto startTimeProcessing = high_resolution_clock::now();
             processFrame(boxCount, roiHeight, trainingMode, classId, receivedImage);
-            auto stopTime = high_resolution_clock::now();
-
-            auto processingTime = duration_cast<milliseconds>(stopTime - startTimeProcessing).count();
-            auto totalLatency = duration_cast<milliseconds>(stopTime - startTimeLoop).count();
-
-            cout << "Current class to send: " << LastPredictedClass << endl;
-            cout << "Total latency: " << totalLatency << endl;
-            cout << "Processing time: " << processingTime << endl;
-
-            sendResults(push_socket, processingTime, totalLatency);
         }
+        auto stopTime = high_resolution_clock::now();
+
+        auto processingTime = duration_cast<milliseconds>(stopTime - startTimeProcessing).count();
+        auto totalLatency = duration_cast<milliseconds>(stopTime - startTimeLoop).count();
+
+        // cout << "Current class to send: " << LastPredictedClass << endl;
+        // cout << "Total latency: " << totalLatency << endl;
+        // cout << "Processing time: " << processingTime << endl;
+
+        sendResults(push_socket, processingTime, totalLatency);
     }
     return 0;
 }

@@ -28,7 +28,7 @@ class DYNAMIC_LIBRARY_EXPORTED_CLASS RasterSpikeSource: public IReceptors
     double                  dStateIncrementFactor;
     void GetSpikesfromImage(unsigned *pfl);
 public:
-    RasterSpikeSource(const pugi::xml_node &xn);
+    RasterSpikeSource(const pugi::xml_node &xn, int nReceptors);
     virtual bool bGenerateSignals(unsigned *pfl, int bitoffset) override;
     virtual void Randomize(void) override {}
     virtual void SaveStatus(Serializer &ser) const override {}
