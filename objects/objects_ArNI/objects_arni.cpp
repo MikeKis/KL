@@ -10,8 +10,9 @@ bool bCommandCopyNetwork = false;
 RECEPTORS_SET_PARAMETERS(pchMyReceptorSectionName, nReceptors, xn)
 {
     if (!strcmp(pchMyReceptorSectionName, "R")) {
-        plssG = new LabelSpikeSource;
-        return new RasterSpikeSource(xn, nReceptors);
+        bool bLearning = !strcmp(xn.child_value("mode"), "learning");
+        plssG = new LabelSpikeSource(bLearning);
+        return new RasterSpikeSource(bLearning, nReceptors);
     }
     if (!strcmp(pchMyReceptorSectionName, "Target")) {
         plssG->SetNReceptors(nReceptors);
@@ -21,7 +22,7 @@ RECEPTORS_SET_PARAMETERS(pchMyReceptorSectionName, nReceptors, xn)
     exit(-1);
 }
 
-DYNAMIC_LIBRARY_ENTRY_POINT IReceptors *LoadStatus(Serializer &ser) {return new LabelSpikeSource;}   // just nothing
+DYNAMIC_LIBRARY_ENTRY_POINT IReceptors *LoadStatus(Serializer &ser) {return new LabelSpikeSource(false);}   // just nothing
 NETWORK_SET_PARAMETERS(xn, NetworkCopy, pchSectionPrefix){}
 
 NETWORK_MODIFY(CurrentTact)
@@ -29,6 +30,7 @@ NETWORK_MODIFY(CurrentTact)
     if (!bCommandCopyNetwork)
         return false;
     inc.ScheduleSavingNetwork(CurrentTact + 1, "obj.F.nns");
+    bCommandCopyNetwork = false;
     return false;
 }
 

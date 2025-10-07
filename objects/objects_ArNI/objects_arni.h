@@ -28,7 +28,7 @@ class DYNAMIC_LIBRARY_EXPORTED_CLASS RasterSpikeSource: public IReceptors
     double                  dStateIncrementFactor;
     void GetSpikesfromImage(unsigned *pfl);
 public:
-    RasterSpikeSource(const pugi::xml_node &xn, int nReceptors);
+    RasterSpikeSource(bool bLearning, int nReceptors);
     virtual bool bGenerateSignals(unsigned *pfl, int bitoffset) override;
     virtual void Randomize(void) override {}
     virtual void SaveStatus(Serializer &ser) const override {}
@@ -41,8 +41,9 @@ class DYNAMIC_LIBRARY_EXPORTED_CLASS LabelSpikeSource: public IReceptors
     bool bGenerateSignalsI(unsigned *pfl);
     int GetPrediction(const VECTOR<PAIR<int, float> > &vpr_Votes) const;
     VECTOR<VECTOR<PAIR<int, float> > > vvpr_PredictedStates;
+    bool                               bBeSilent;
 public:
-    LabelSpikeSource();
+    LabelSpikeSource(bool bLearning);
     virtual bool bGenerateSignals(unsigned *pfl, int bitoffset) override
     {
         if (bitoffset)

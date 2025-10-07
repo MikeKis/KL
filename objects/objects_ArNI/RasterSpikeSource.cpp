@@ -8,10 +8,10 @@ extern LabelSpikeSource *plssG;
 extern bool bCommandCopyNetwork;
 extern NamedPipe2directional np2;
 
-RasterSpikeSource::RasterSpikeSource(const pugi::xml_node &xn, int nReceptors): vuc_Raster(nReceptors)
+RasterSpikeSource::RasterSpikeSource(bool bLearning, int nReceptors): vuc_Raster(nReceptors)
 {
     SetNReceptors(nReceptors);
-    np2.open(!strcmp(xn.child_value("mode"), "learning") ? ARNI_FIFO_PATH_LEARNING : ARNI_FIFO_PATH_INFERENCE);
+    np2.open(bLearning ? ARNI_FIFO_PATH_LEARNING : ARNI_FIFO_PATH_INFERENCE);
     vd_State.resize(GetNReceptors(), 0.);
     dStateIncrementFactor = dmaxFrequency / 255;
 }

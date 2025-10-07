@@ -6,7 +6,7 @@ NamedPipe2directional np2Learning;
 
 void Learn(const cv::Mat &mat, int ClassId)
 {
-    static vector<string> vstr_Arguments = {".", "-e30000"};
+    static vector<string> vstr_Arguments = {".", "-e30000", "-Pt"};
     static std::unique_ptr<boost::process::child> upchi;
     if (!upchi) {
         np2Learning.make(ARNI_FIFO_PATH_LEARNING);

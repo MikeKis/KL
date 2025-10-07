@@ -6,7 +6,9 @@
     		<mode>inference</mode>
     	    </args>
     </RECEPTORS>
-    <RECEPTORS name="Target" n="10"></RECEPTORS>
+    <RECEPTORS name="Target" n="10">
+	<Implementation lib="objects_ArNI"></Implementation>    <!--it emits nothing here - needed just to pass the target class count-->
+    </RECEPTORS>
     <NETWORK saved="obj.F.nns"></NETWORK>
     <Readout lib="objects_ArNI">
 	<output>OUT</output>

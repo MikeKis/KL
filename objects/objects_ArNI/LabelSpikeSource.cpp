@@ -4,11 +4,11 @@ using namespace std;
 
 NamedPipe2directional np2;
 
-LabelSpikeSource::LabelSpikeSource(){}
+LabelSpikeSource::LabelSpikeSource(bool bLearning): bBeSilent(!bLearning) {}
 
 bool LabelSpikeSource::bGenerateSignalsI(unsigned *pfl)
 {
-    if (tact % RecordPresentationPeriod + 1 != PicturePresentationTime) {
+    if (bBeSilent || tact % RecordPresentationPeriod + 1 != PicturePresentationTime) {
         *reinterpret_cast<UNS64 *>(pfl) = 0;
         return true;
     }
