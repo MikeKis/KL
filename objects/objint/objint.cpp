@@ -84,7 +84,7 @@ void sendResults(zmq::socket_t &push_socket, long processingTime, long totalLate
     string performance = to_string(processingTime);
     string latency = to_string(totalLatency);
     stringstream ss;
-    ss << LastPredictedClass;
+    ss << LastPredictedClass << ',';
     push_socket.send(ss.str().c_str(), ss.str().size(), ZMQ_NOBLOCK);
     push_socket.send(latency.c_str(), latency.size(), ZMQ_NOBLOCK);
     push_socket.send(performance.c_str(), performance.size(), ZMQ_NOBLOCK);

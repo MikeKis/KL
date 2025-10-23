@@ -12,4 +12,9 @@ void FixNetwork()
     int i = -1;
     np2Learning.write(i);
     np2Learning.read(i);
+
+    std::cout << "Trained network saved to obj.F.nns\n";
+
+    system("cp ./sav/obj.F.nns .");
+
 }

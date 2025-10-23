@@ -9,7 +9,7 @@ std::unique_ptr<boost::process::child> upchi;
 void Inference(const cv::Mat &mat)
 {
     if (!upchi) {
-        vector<string> vstr_Arguments = {".", "-e30001", "-f0"};
+        vector<string> vstr_Arguments = {".", "-e30001", "-f0", "-Pt", "-v1", "-r"};
         np2Inference.make(ARNI_FIFO_PATH_INFERENCE);
         upchi.reset(new boost::process::child("ArNIGPU", vstr_Arguments));
     }

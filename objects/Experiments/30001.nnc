@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf - 8"?>
-<SNN model="superquantized">   <!--model is not important here-->
+<SNN model="superquantized">   <!--model should be the same as used in the training process!!-->
     <RECEPTORS name="R" n="961">
 	<Implementation lib="objects_ArNI"></Implementation>
     	    <args>

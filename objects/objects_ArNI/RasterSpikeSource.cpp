@@ -23,7 +23,7 @@ bool RasterSpikeSource::bGenerateSignals(unsigned *pfl, int bitoffset)
         exit(-40000);
     }
     fill(pfl, pfl + (GetNReceptors() - 1) / 32 + 1, 0);
-    if (!FrameTactCounter) {
+    if (!(plssG->tact % RecordPresentationPeriod)) {
         int i = 0;
         if (np2.strName() == ARNI_FIFO_PATH_LEARNING)
             np2.read(i);
@@ -38,9 +38,8 @@ bool RasterSpikeSource::bGenerateSignals(unsigned *pfl, int bitoffset)
             fill(vuc_Raster.begin(), vuc_Raster.end(), 0);
             bCommandCopyNetwork = true;
         }
-        FrameTactCounter = RecordPresentationPeriod;
     }
-    if (FrameTactCounter-- > RecordPresentationPeriod - PicturePresentationTime)
+    if (plssG->tact % RecordPresentationPeriod < PicturePresentationTime)
         GetSpikesfromImage(pfl);
     return true;
 }

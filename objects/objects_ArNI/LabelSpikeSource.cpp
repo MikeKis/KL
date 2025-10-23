@@ -33,7 +33,7 @@ void LabelSpikeSource::ObtainOutputSpikes(const VECTOR<int> &v_Firing)
 {
     for (auto i: v_Firing)
         ++vn_PredictionVotes[i];
-    if (!((tact + 1) % RecordPresentationPeriod)) {   // tact 14
+    if (!((tact++ + 1) % RecordPresentationPeriod)) {   // tact 14
         static int indran = 0;
         vector<float> vr_perNetworkPredictionVotes(GetNReceptors(), 0.F);
         auto l = vn_PredictionVotes.begin();
@@ -57,7 +57,6 @@ void LabelSpikeSource::ObtainOutputSpikes(const VECTOR<int> &v_Firing)
         np2.write(pred);
         fill(vn_PredictionVotes.begin(), vn_PredictionVotes.end(), 0);
     }
-    ++tact;
 }
 
 int LabelSpikeSource::GetPrediction(const vector<pair<int, float> > &vpr_Votes) const
@@ -71,7 +70,7 @@ int LabelSpikeSource::GetPrediction(const vector<pair<int, float> > &vpr_Votes) 
     FORI(GetNReceptors())
         vr_[_i] += vr_perNetworkPredictionVotes[_i];
     float rbest = 0.F;
-    int pred;
+    int pred = -1;
     static int scount = 0;
     int indran = (int)(scount++ % vr_.size());
     FORI(vr_.size()) {

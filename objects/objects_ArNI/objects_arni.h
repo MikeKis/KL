@@ -24,7 +24,6 @@ class DYNAMIC_LIBRARY_EXPORTED_CLASS RasterSpikeSource: public IReceptors
 {
     VECTOR<unsigned char>   vuc_Raster;
     VECTOR<double>          vd_State;
-    int                     FrameTactCounter = 0;
     double                  dStateIncrementFactor;
     void GetSpikesfromImage(unsigned *pfl);
 public:
