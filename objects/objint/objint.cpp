@@ -40,7 +40,7 @@ void predictOnRoi(Mat &receivedRoi)
     cv::Mat resizedRoi; // frame for inference (31 x 31)
     Preprocess(receivedRoi, resizedRoi);
     Inference(resizedRoi);
-    cout << "Predicted class: " << LastPredictedClass << endl;
+//    cout << "Predicted class: " << LastPredictedClass << endl;
 }
 
 void processFrame(int boxCount, int roiHeight, int trainingMode, int classId, const Mat &receivedImage)
@@ -50,7 +50,7 @@ void processFrame(int boxCount, int roiHeight, int trainingMode, int classId, co
     if (bytes_available) {
         if (bytes_available > 0) {
             pnp2Current->read(LastPredictedClass);
-            cout << "Response received from ArNIGPU: " << LastPredictedClass << endl;
+//            cout << "Response received from ArNIGPU: " << LastPredictedClass << endl;
         }
 
         for (int boxIndex = 0; boxIndex < boxCount; ++boxIndex)
