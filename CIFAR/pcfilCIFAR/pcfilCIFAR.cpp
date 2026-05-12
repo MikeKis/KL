@@ -12,6 +12,7 @@ int main(int argc, char *argv[])
     const char *inputFile = argc > 1 ? argv[1] : "..\\Workplace\\CIFAR10.bin";
     const char *filters3File = argc > 2 ? argv[2] : "..\\Workplace\\PCFilters_3x3.txt";
     const char *filters6File = argc > 3 ? argv[3] : "..\\Workplace\\PCFilters_6x6.txt";
+    const char *filters12File = argc > 4 ? argv[4] : "..\\Workplace\\PCFilters_12x12.txt";
 
     constexpr int kImageSize = 32;
     constexpr int kChannels = 3;
@@ -45,15 +46,19 @@ int main(int argc, char *argv[])
 
         std::vector<cv::Mat> filters3(kFilterCount);
         std::vector<cv::Mat> filters6(kFilterCount);
+        std::vector<cv::Mat> filters12(kFilterCount);
 
         PCFilters(images, filters3, 3, kSampleSize, 300);
         PCFilters(images, filters6, 6, kSampleSize, 600);
+        PCFilters(images, filters12, 12, kSampleSize, 1200);
 
         SavePCFilters(filters3, filters3File);
         SavePCFilters(filters6, filters6File);
+        SavePCFilters(filters12, filters12File);
 
         std::cout << "Saved 3x3 filters to: " << filters3File << "\n";
         std::cout << "Saved 6x6 filters to: " << filters6File << "\n";
+        std::cout << "Saved 12x12 filters to: " << filters12File << "\n";
         std::cout << "Done!\n";
         return 0;
     } catch (const std::exception &ex) {

@@ -37,7 +37,7 @@ def parse_filters(path: Path):
 
 def plot_heatmaps(filters, output_path: Path, title: str):
     n = len(filters)
-    fig, axes = plt.subplots(n, 3, figsize=(9, max(2, n * 1.8)))
+    fig, axes = plt.subplots(3, n, figsize=(9, max(2, n * 1.8)))
     if n == 1:
         axes = np.array([axes])
 
@@ -52,17 +52,18 @@ def plot_heatmaps(filters, output_path: Path, title: str):
             max_abs = 1.0
 
         for ch in range(3):
-            ax = axes[i, ch]
+            ax = axes[ch, i]
             im = ax.imshow(channel_maps[ch], cmap="bwr", vmin=-max_abs, vmax=max_abs)
             ax.set_xticks([])
             ax.set_yticks([])
-            ax.set_title(f"F{i:02d} C{ch}", fontsize=8)
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            # ax.set_title(f"F{i:02d} C{ch}", fontsize=8)
+            # fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     fig.suptitle(title)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=200)
-    plt.close(fig)
+    plt.show()
+#    fig.savefig(output_path, dpi=200)
+#    plt.close(fig)
 
 
 def main():
@@ -70,7 +71,7 @@ def main():
     parser.add_argument(
         "input_files",
         nargs="*",
-        default=["..\\Workplace\\PCFilters_3x3.txt", "..\\Workplace\\PCFilters_6x6.txt"],
+        default=["..\\Workplace\\PCFilters_3x3.txt", "..\\Workplace\\PCFilters_6x6.txt", "..\\Workplace\\PCFilters_12x12.txt"],
         help="Filter files produced by SavePCFilters.",
     )
     args = parser.parse_args()

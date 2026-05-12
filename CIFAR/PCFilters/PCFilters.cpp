@@ -147,9 +147,8 @@ void PCFilters(const std::vector<cv::Mat> &vmat_Images,
 
     const int channels = vmat_Images.front().channels();
     const int dimension = FilterSize * FilterSize * channels;
-    if (static_cast<int>(nFilters) > dimension) {
+    if (static_cast<int>(nFilters) + 1 > dimension)   // #0 filter is not interesting!
         throw std::invalid_argument("PCFilters: number of requested components is larger than patch dimension");
-    }
 
     cv::Mat sampleMatrix(SampleSize, dimension, CV_32F);
 
@@ -185,11 +184,11 @@ void PCFilters(const std::vector<cv::Mat> &vmat_Images,
         }
     }
 
-    cv::PCA pca(sampleMatrix, cv::Mat(), cv::PCA::DATA_AS_ROW, static_cast<int>(nFilters));
+    cv::PCA pca(sampleMatrix, cv::Mat(), cv::PCA::DATA_AS_ROW, static_cast<int>(nFilters) + 1);
 
     for (size_t i = 0; i < nFilters; ++i) {
         cv::Mat filter(FilterSize, FilterSize, CV_MAKETYPE(CV_32F, channels));
-        const float *eigenvector = pca.eigenvectors.ptr<float>(static_cast<int>(i));
+        const float *eigenvector = pca.eigenvectors.ptr<float>(static_cast<int>(i) + 1);
 
         int offset = 0;
         for (int r = 0; r < FilterSize; ++r) {

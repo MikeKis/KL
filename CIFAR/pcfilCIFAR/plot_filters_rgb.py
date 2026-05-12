@@ -60,12 +60,13 @@ def plot_rgb_rows(filters, output_path: Path, title: str):
         ax.imshow(project_to_rgb_uint8(filt))
         ax.set_xticks([])
         ax.set_yticks([])
-        ax.set_title(f"F{i:02d}", fontsize=8)
+        # ax.set_title(f"F{i:02d}", fontsize=8)
 
     fig.suptitle(title)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=200)
-    plt.close(fig)
+    plt.show()
+    # fig.savefig(output_path, dpi=200)
+    # plt.close(fig)
 
 
 def main():
@@ -73,7 +74,7 @@ def main():
     parser.add_argument(
         "input_files",
         nargs="*",
-        default=["..\\Workplace\\PCFilters_3x3.txt", "..\\Workplace\\PCFilters_6x6.txt"],
+        default=["..\\Workplace\\PCFilters_3x3.txt", "..\\Workplace\\PCFilters_6x6.txt", "..\\Workplace\\PCFilters_12x12.txt"],
         help="Filter files produced by SavePCFilters.",
     )
     args = parser.parse_args()
