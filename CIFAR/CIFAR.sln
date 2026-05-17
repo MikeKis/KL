@@ -1,6 +1,7 @@
-﻿Microsoft Visual Studio Solution File, Format Version 12.00
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.37216.2 d17.14
+VisualStudioVersion = 17.14.37216.2
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PCFilters", "PCFilters\PCFilters.vcxproj", "{4D4D9640-53D4-4F62-BE42-099CCA5DE473}"
 EndProject
@@ -44,8 +45,7 @@ Global
 		{E2F8A91C-4B3D-4E5F-9A1C-7D8E9F0A1B2C}.Debug|Win32.Build.0 = Debug|Win32
 		{E2F8A91C-4B3D-4E5F-9A1C-7D8E9F0A1B2C}.Debug|x64.ActiveCfg = Debug|x64
 		{E2F8A91C-4B3D-4E5F-9A1C-7D8E9F0A1B2C}.Debug|x64.Build.0 = Debug|x64
-		{E2F8A91C-4B3D-4E5F-9A1C-7D8E9F0A1B2C}.Release|Win32.ActiveCfg = Release|Win32
-		{E2F8A91C-4B3D-4E5F-9A1C-7D8E9F0A1B2C}.Release|Win32.Build.0 = Release|Win32
+		{E2F8A91C-4B3D-4E5F-9A1C-7D8E9F0A1B2C}.Release|Win32.ActiveCfg = Release|x64
 		{E2F8A91C-4B3D-4E5F-9A1C-7D8E9F0A1B2C}.Release|x64.ActiveCfg = Release|x64
 		{E2F8A91C-4B3D-4E5F-9A1C-7D8E9F0A1B2C}.Release|x64.Build.0 = Release|x64
 		{F3A4B5C6-D7E8-49F0-A1B2-C3D4E5F60718}.Debug|Win32.ActiveCfg = Debug|x64
