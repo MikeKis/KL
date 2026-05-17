@@ -1,5 +1,4 @@
 #include "ConvolutionConfig.h"
-#include "ConvolutionOutputWriter.h"
 #include "ConvolutionPipeline.h"
 #include "FilterBank.h"
 #include "RawImageLoader.h"
@@ -25,18 +24,16 @@ int RunConvolution(const char *configPath)
         strides.push_back(entry.stride);
     }
 
+    std::cout << "Loading filters\n";
     const std::vector<LoadedFilterBank> banks = LoadFilterBanks(filterFiles, strides);
     const int channels = GetFilterChannels(banks);
+
+    std::cout << "Loading images from " << config.inputFile << '\n';
     const std::vector<cv::Mat> images =
         LoadRawImages(config.inputFile, config.inputWidth, config.inputHeight, channels);
+    std::cout << "Loaded " << images.size() << " images, channels=" << channels << '\n';
 
-    std::cerr << "Loaded " << images.size() << " images, channels=" << channels << '\n';
-
-    ConvolutionPipelineResult pipeline = BuildPipelineResult(images, banks);
-    std::vector<VmaxEstimateResult> vmaxResults =
-        EstimateAllVmax(pipeline, config.projectionMode, config.projectionCriterion);
-
-    WriteConvolutionOutputs(config, pipeline, vmaxResults, configPath, static_cast<int>(images.size()));
+    RunConvolutionPipeline(config, configPath, images, banks);
     return 0;
 }
 

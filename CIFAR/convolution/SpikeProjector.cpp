@@ -27,17 +27,3 @@ double MeanSpike(const double *values, std::size_t count, double vmax)
     }
     return sum / static_cast<double>(count);
 }
-
-double SaturationFraction(const double *values, std::size_t count, double vmax)
-{
-    if (count == 0) {
-        return 0.0;
-    }
-    std::size_t above = 0;
-    for (std::size_t i = 0; i < count; ++i) {
-        if (values[i] > vmax) {
-            ++above;
-        }
-    }
-    return static_cast<double>(above) / static_cast<double>(count);
-}

@@ -87,7 +87,13 @@ ConvolutionConfig ParseConvolutionConfig(const char *configPath)
     const std::string mode = projection->get("mode")->value_or("");
     config.projectionMode = ParseProjectionMode(mode);
     config.projectionCriterion = projection->get("criterion")->value_or(0.0);
+    if (const toml::node *vmaxSampleNode = projection->get("vmax_sample_size")) {
+        config.vmaxSampleSize = static_cast<int>(vmaxSampleNode->value_or(3000));
+    }
     ValidateCriterion(config.projectionMode, config.projectionCriterion);
+    if (config.vmaxSampleSize <= 0) {
+        throw std::runtime_error("projection.vmax_sample_size must be positive");
+    }
 
     const toml::table *output = root["output"].as_table();
     if (output == nullptr) {

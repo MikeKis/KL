@@ -3,7 +3,11 @@ project(convolution_test CXX)
 set(SRC
     "convolution_test.cpp"
     "../ConvolutionConfig.cpp"
+    "../ConvolutionPipeline.cpp"
+    "../ConvolutionOutputWriter.cpp"
     "../ConvolutionRunner.cpp"
+    "../FilterBank.cpp"
+    "../RawImageLoader.cpp"
     "../SpikeProjector.cpp"
     "../VmaxEstimator.cpp"
 )
@@ -21,6 +25,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 
 target_link_libraries(${PROJECT_NAME} PUBLIC
     ${OpenCV_LIBS}
+    PCFilters
 )
 
 add_test(NAME convolution_test COMMAND convolution_test

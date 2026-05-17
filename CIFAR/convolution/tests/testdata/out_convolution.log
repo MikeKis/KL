@@ -1,6 +1,8 @@
 version=1.0.0
 config=testdata\minimal.toml
 images=2
+vmax_sample_size=3000
+vmax_sample_count=2
 mode=def_sparsity
 criterion=2
 map file=testdata/test_filters.txt filter=0 width=6 height=6

@@ -73,9 +73,18 @@
   <ItemGroup>
     <ClCompile Include="convolution_test.cpp" />
     <ClCompile Include="..\ConvolutionConfig.cpp" />
+    <ClCompile Include="..\ConvolutionPipeline.cpp" />
+    <ClCompile Include="..\ConvolutionOutputWriter.cpp" />
     <ClCompile Include="..\ConvolutionRunner.cpp" />
+    <ClCompile Include="..\FilterBank.cpp" />
+    <ClCompile Include="..\RawImageLoader.cpp" />
     <ClCompile Include="..\SpikeProjector.cpp" />
     <ClCompile Include="..\VmaxEstimator.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\PCFilters\PCFilters.vcxproj">
+      <Project>{4D4D9640-53D4-4F62-BE42-099CCA5DE473}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

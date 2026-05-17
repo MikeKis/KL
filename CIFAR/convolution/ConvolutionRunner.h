@@ -32,5 +32,11 @@ struct ConvolutionRunResult {
     std::vector<MapSize> mapSizesPerBankFilter;
 };
 
+std::vector<MapSize> ComputeMapSizesForBanks(int imageWidth, int imageHeight,
+                                             const std::vector<LoadedFilterBank> &banks);
+
+BankMapsForImage ConvolveImage(const cv::Mat &image, const std::vector<LoadedFilterBank> &banks,
+                               const std::vector<MapSize> &mapSizesPerBankFilter);
+
 ConvolutionRunResult RunConvolutions(const std::vector<cv::Mat> &images,
                                      const std::vector<LoadedFilterBank> &banks);

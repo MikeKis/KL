@@ -20,6 +20,7 @@ struct ConvolutionConfig {
     std::vector<FilterConfigEntry> filters;
     ProjectionMode projectionMode = ProjectionMode::DefSparsity;
     double projectionCriterion = 0.0;
+    int vmaxSampleSize = 3000;
     std::string outputConvolutionsBin;
     std::string outputSpikesCsv;
     std::string outputLog;
