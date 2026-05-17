@@ -1,0 +1,10 @@
+[PCFilters]
+version=1
+count=1
+
+[Filter0]
+rows=3
+cols=3
+channels=1
+type=5
+values=1 0 -1 0 1 0 -1 0 1

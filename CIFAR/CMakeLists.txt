@@ -8,3 +8,4 @@ find_package(OpenCV REQUIRED)
 
 add_subdirectory(PCFilters)
 add_subdirectory(pcfilCIFAR)
+add_subdirectory(convolution)

@@ -1,0 +1,7 @@
+version=1.0.0
+config=testdata\minimal.toml
+images=2
+mode=def_sparsity
+criterion=2
+map file=testdata/test_filters.txt filter=0 width=6 height=6
+filter file=testdata/test_filters.txt index=0 Vmax=100 saturation_fraction=0
