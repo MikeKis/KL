@@ -1,0 +1,17 @@
+[input]
+file = "testdata/test_images.bin"
+width = 8
+height = 8
+
+[[filters]]
+file = "testdata/test_filters.txt"
+stride = 1
+
+[projection]
+mode = "def_sparsity"
+criterion = 2.0
+
+[output]
+convolutions_bin = "testdata/out_conv_values.bin"
+spikes_csv = "testdata/out_conv_spikes.csv"
+log = "testdata/out_convolution.log"
