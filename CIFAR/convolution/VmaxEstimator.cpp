@@ -56,6 +56,7 @@ VmaxEstimateResult EstimateVmax(const std::vector<double> &values, ProjectionMod
     } else {
         int ind = (int)(vd_.size() * (1 - criterion));
         best.vmax = ind < vd_.size() ? vd_[ind] : vd_.back();
+        best.meanSpike = MeanSpike(&vd_.front(), vd_.size(), best.vmax);
     }
     return best;
 }

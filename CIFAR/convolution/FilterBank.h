@@ -11,7 +11,6 @@ struct LoadedFilterBank {
     std::vector<cv::Mat> filters;
 };
 
-std::vector<LoadedFilterBank> LoadFilterBanks(const std::vector<std::string> &files,
-                                              const std::vector<int> &strides);
+std::vector<LoadedFilterBank> LoadFilterBanks(const std::vector<std::string> &files, const std::vector<int> &strides, const std::vector<int> &scales);
 
 int GetFilterChannels(const std::vector<LoadedFilterBank> &banks);

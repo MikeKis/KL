@@ -10,7 +10,8 @@ enum class ProjectionMode {
 
 struct FilterConfigEntry {
     std::string file;
-    int stride = 1;
+    int         stride = 1;
+    int         scale = 1;
 };
 
 struct ConvolutionConfig {

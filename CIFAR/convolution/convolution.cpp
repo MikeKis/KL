@@ -16,16 +16,18 @@ int RunConvolution(const char *configPath)
     const ConvolutionConfig config = ParseConvolutionConfig(configPath);
 
     std::vector<std::string> filterFiles;
-    std::vector<int> strides;
+    std::vector<int> strides, scales;
     filterFiles.reserve(config.filters.size());
     strides.reserve(config.filters.size());
+    scales.reserve(config.filters.size());
     for (const FilterConfigEntry &entry : config.filters) {
         filterFiles.push_back(entry.file);
         strides.push_back(entry.stride);
+        scales.push_back(entry.scale);
     }
 
     std::cout << "Loading filters\n";
-    const std::vector<LoadedFilterBank> banks = LoadFilterBanks(filterFiles, strides);
+    const std::vector<LoadedFilterBank> banks = LoadFilterBanks(filterFiles, strides, scales);
     const int channels = GetFilterChannels(banks);
 
     std::cout << "Loading images from " << config.inputFile << '\n';

@@ -71,11 +71,16 @@ ConvolutionConfig ParseConvolutionConfig(const char *configPath)
         FilterConfigEntry filterEntry;
         filterEntry.file = entry->get("file")->value_or("");
         filterEntry.stride = static_cast<int>(entry->get("stride")->value_or(0));
+        auto pnodScale = entry->get("scale");
+        filterEntry.scale = pnodScale ? static_cast<int>(pnodScale->value_or(0)) : 1;
         if (filterEntry.file.empty()) {
             throw std::runtime_error("filters[].file is required");
         }
         if (filterEntry.stride < 1) {
             throw std::runtime_error("filters[].stride must be >= 1");
+        }
+        if (filterEntry.scale < 1) {
+            throw std::runtime_error("filters[].scale must be >= 1");
         }
         config.filters.push_back(std::move(filterEntry));
     }

@@ -4,8 +4,20 @@
 
 #include <stdexcept>
 
-std::vector<LoadedFilterBank> LoadFilterBanks(const std::vector<std::string> &files,
-                                              const std::vector<int> &strides)
+void RescaleFiters(std::vector<cv::Mat> &filters_out, const std::vector<cv::Mat> &filters_in, int scale)
+{
+    filters_out.resize(filters_in.size());
+    for (size_t i = 0; i < filters_in.size(); ++i) {
+        filters_out[i] = cv::Mat(filters_in[i].rows * scale, filters_in[i].cols * scale, filters_in[i].type());
+        for (int r = 0; r < filters_in[i].rows; ++r)
+            for (int c = 0; c < filters_in[i].cols; ++c)
+                for (int dr = 0; dr < scale; ++dr)
+                    for (int dc = 0; dc < scale; ++dc)
+                        std::memcpy(filters_out[i].ptr(r * scale + dr, c * scale + dc), filters_in[i].ptr(r, c), filters_in[i].elemSize());
+    }
+}
+
+std::vector<LoadedFilterBank> LoadFilterBanks(const std::vector<std::string> &files, const std::vector<int> &strides, const std::vector<int> &scales)
 {
     if (files.size() != strides.size()) {
         throw std::invalid_argument("files and strides size mismatch");
@@ -18,7 +30,13 @@ std::vector<LoadedFilterBank> LoadFilterBanks(const std::vector<std::string> &fi
         LoadedFilterBank bank;
         bank.file = files[i];
         bank.stride = strides[i];
-        LoadPCFilters(bank.filters, bank.file.c_str());
+        if (scales[i] == 1)
+            LoadPCFilters(bank.filters, bank.file.c_str());
+        else {
+            std::vector<cv::Mat> filters;
+            LoadPCFilters(filters, bank.file.c_str());
+            RescaleFiters(bank.filters, filters, scales[i]);
+        }
         if (bank.filters.empty()) {
             throw std::runtime_error("filter bank is empty: " + bank.file);
         }
