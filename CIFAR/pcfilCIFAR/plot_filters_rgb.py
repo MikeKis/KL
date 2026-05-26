@@ -74,7 +74,7 @@ def main():
     parser.add_argument(
         "input_files",
         nargs="*",
-        default=["..\\Workplace\\PCFilters_3x3.txt", "..\\Workplace\\PCFilters_6x6.txt", "..\\Workplace\\PCFilters_12x12.txt"],
+        default=["..\\Workplace\\PCFilters_3x3.txt", "..\\Workplace\\PCFilters_scale_2.txt", "..\\Workplace\\PCFilters_scale_4.txt"],
         help="Filter files produced by SavePCFilters.",
     )
     args = parser.parse_args()

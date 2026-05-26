@@ -4,15 +4,15 @@
 #include <vector>
 
 #include <opencv2/core.hpp>
+#include <opencv2/opencv.hpp>
 
 #include "../PCFilters/PCFilters.h"
 
 int main(int argc, char *argv[])
 {
     const char *inputFile = argc > 1 ? argv[1] : "..\\Workplace\\CIFAR10.bin";
-    const char *filters3File = argc > 2 ? argv[2] : "..\\Workplace\\PCFilters_3x3.txt";
-    const char *filters6File = argc > 3 ? argv[3] : "..\\Workplace\\PCFilters_6x6.txt";
-    const char *filters12File = argc > 4 ? argv[4] : "..\\Workplace\\PCFilters_12x12.txt";
+    const char *filters2File = argc > 2 ? argv[2] : "..\\Workplace\\PCFilters_scale_2.txt";
+    const char *filters4File = argc > 3 ? argv[3] : "..\\Workplace\\PCFilters_scale_4.txt";
 
     constexpr int kImageSize = 32;
     constexpr int kChannels = 3;
@@ -44,21 +44,24 @@ int main(int argc, char *argv[])
 
         std::cout << "Loaded images: " << images.size() << "\n";
 
-        std::vector<cv::Mat> filters3(kFilterCount);
-        std::vector<cv::Mat> filters6(kFilterCount);
-        std::vector<cv::Mat> filters12(kFilterCount);
+        std::vector<cv::Mat> imagesPooled2(kMaxImages);
+        std::vector<cv::Mat> imagesPooled4(kMaxImages);
+        for (int i = 0; i < kMaxImages; ++i) {
+            cv::boxFilter(images[i], imagesPooled2[i], -1, cv::Size(2, 2), cv::Point(-1, -1), true);
+            cv::boxFilter(images[i], imagesPooled4[i], -1, cv::Size(4, 4), cv::Point(-1, -1), true);
+        }
 
-        PCFilters(images, filters3, 3, kSampleSize, 300);
-        PCFilters(images, filters6, 6, kSampleSize, 600);
-        PCFilters(images, filters12, 12, kSampleSize, 1200);
+        std::vector<cv::Mat> filters2(kFilterCount);
+        std::vector<cv::Mat> filters4(kFilterCount);
 
-        SavePCFilters(filters3, filters3File);
-        SavePCFilters(filters6, filters6File);
-        SavePCFilters(filters12, filters12File);
+        PCFilters(imagesPooled2, filters2, 3, kSampleSize, 300);
+        PCFilters(imagesPooled4, filters4, 3, kSampleSize, 600);
 
-        std::cout << "Saved 3x3 filters to: " << filters3File << "\n";
-        std::cout << "Saved 6x6 filters to: " << filters6File << "\n";
-        std::cout << "Saved 12x12 filters to: " << filters12File << "\n";
+        SavePCFilters(filters2, filters2File);
+        SavePCFilters(filters4, filters4File);
+
+        std::cout << "Saved scale 2 filters to: " << filters2File << "\n";
+        std::cout << "Saved scale 4 filters to: " << filters4File << "\n";
         std::cout << "Done!\n";
         return 0;
     } catch (const std::exception &ex) {
