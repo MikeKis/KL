@@ -1,0 +1,28 @@
+[input]
+file = "CIFAR10.bin"
+width = 32
+height = 32
+
+[[filters]]
+file = "CIFAR_3x3.PCFilters.txt"
+stride = 1
+
+[[filters]]
+file = "PCFilters_scale_2.txt"
+stride = 2
+scale = 2
+
+[[filters]]
+file = "PCFilters_scale_4.txt"
+stride = 4
+scale = 4
+
+[projection]
+mode = "def_saturation"
+criterion = 0.03
+vmax_sample_size = 3000
+
+[output]
+convolutions_bin = "CIFAR_1_2_4_scaled.bin"
+spikes_csv = "CIFAR_1_2_4_scaled.csv"
+log = "CIFAR_1_2_4_scaled.log"
