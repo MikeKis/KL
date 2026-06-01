@@ -145,6 +145,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="rGetOptimumSparsitySaturationLevel10.cpp" />
     <ClCompile Include="UnsupervisedFiltersMultiple.cpp" />
   </ItemGroup>
   <ItemGroup>

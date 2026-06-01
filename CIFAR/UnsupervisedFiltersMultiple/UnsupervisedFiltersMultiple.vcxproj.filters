@@ -18,6 +18,9 @@
     <ClCompile Include="UnsupervisedFiltersMultiple.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="rGetOptimumSparsitySaturationLevel10.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="UnsupervisedFiltersMultiple.h">
