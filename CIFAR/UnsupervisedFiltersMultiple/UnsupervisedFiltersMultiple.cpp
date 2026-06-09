@@ -141,14 +141,12 @@ Mat matNormalize(const Mat &matin, vector<double> vd_perMapMaximum, int typeout,
     int ind = (int)(vd_.size() - vd_.size() * rBrightnessThresholdQuantile);
     if (ind == vd_.size())
         --ind;
-//    while (ind < vd_.size() && !vd_[ind])
-//        ++ind;
-    float rScaling = ind < vd_.size() ? 1.F / vd_[ind] : 1.F;
+    double dScaling = ind < vd_.size() ? 1.F / vd_[ind] : 1.F;
     for (int r = 0; r < matout.rows; ++r) {
         auto *pout = matout.ptr<double>(r);
         for (int c = 0; c < matout.cols; ++c)
             for (int cha = 0; cha < nInputChannels; ++cha) {
-                *pout *= rScaling;
+                *pout *= dScaling;
                 if (*pout > 1.)
                     *pout = 1.;
                 vr_.push_back((float)*pout);
@@ -217,10 +215,12 @@ inline bool operator<(convcoo cc1, convcoo cc2){return reinterpret_cast<unsigned
 vector<vector<Mat> > vvmat_UnsupervisedFilters(const vector<Mat> &vmat_Images, const vector<ConvolutionalLayerProperties> &vclp_, float rBrightnessThresholdQuantile)
 {
     // Enable trapping for division by zero
+#ifdef FOR_LINUX
     if (feenableexcept(FE_DIVBYZERO) != 0) {
         perror("feenableexcept failed");
         exit(-1);
     }
+#endif
     if (any_of(vclp_.begin(), vclp_.end(), [](const ConvolutionalLayerProperties &clp){return clp.nFilters > CV_CN_MAX;}))
 		throw std::runtime_error("too many filters");
 	if (vclp_.empty())
@@ -377,7 +377,7 @@ vector<vector<Mat> > vvmat_UnsupervisedFilters(const vector<Mat> &vmat_Images, c
         cout << vvmat_ret[Layer].size() << " filters obtained\n";
 		if (Layer == vvmat_ret.size() - 1)
 			return vvmat_ret;
-        typeInput = CV_64FC(vvmat_ret[Layer].size());
+        typeInput = CV_64FC((int)vvmat_ret[Layer].size());
         vector<float> vr_;
         for (int tensor = 0; tensor < vmat_CurrentTensors.size(); ++tensor) {
             Mat matConv = matConvolution(vmat_CurrentTensors[tensor], vvmat_ret[Layer], vclp_[Layer].Stride);
@@ -390,4 +390,203 @@ vector<vector<Mat> > vvmat_UnsupervisedFilters(const vector<Mat> &vmat_Images, c
         rBrightnessThreshold = vr_[ind];
     }
 	return vector<vector<Mat> >();   // never here
+}
+
+void DetermineperChannelSaturationLevel(const vector<cv::Mat> &vmat_Maps, vector<float> &vr_perChannelSaturationLevel)
+{
+    const int sample_size = 300000;
+    mt19937 g(300);
+    uniform_int_distribution<int> uidMap(0, (int)vmat_Maps.size() - 1);
+    uniform_int_distribution<int> uidpos(0, (int)vmat_Maps.front().cols - 1);
+    int ncha = vmat_Maps.front().channels();
+    vector<vector<float> > vvr_samples(ncha, vector<float>(sample_size));
+    for (int i = 0; i < sample_size; ++i) {
+        const auto *ptr = vmat_Maps[uidMap(g)].ptr<float>(uidpos(g)) + uidpos(g) * ncha;
+        for (auto &j: vvr_samples)
+            j[i] = *ptr++;
+    }
+    vr_perChannelSaturationLevel.resize(ncha);
+    for (int i = 0; i < ncha; ++i) {
+        float rSparsity, rResultingSparsityBoost;
+        vr_perChannelSaturationLevel[i] = rGetOptimumSparsitySaturationLevel10(vvr_samples[i], rSparsity, rResultingSparsityBoost);
+    }
+}
+
+void Normalize(Mat &tensor, const vector<float> &vr_perChannelSaturationLevel)
+{
+    int ncha = tensor.channels();
+    for (int r = 0; r < tensor.rows; ++r) {
+        auto *ptr = tensor.ptr<float>(r);
+        for (int c = 0; c < tensor.cols; ++c) 
+            for (int cha = 0; cha < ncha; ++cha) {
+                if (*ptr <= 0.F)
+                    *ptr = 0.F;
+                else if (*ptr < vr_perChannelSaturationLevel[cha])
+                    *ptr /= vr_perChannelSaturationLevel[cha];
+                else *ptr = 1.F;
+                ++ptr;
+            }
+    }
+}
+
+
+std::vector<cv::Mat> vmat_UnsupervisedFilters(std::vector<cv::Mat> &vmat_Maps, const ConvolutionalLayerProperties &clp, float rBrightnessThresholdQuantile)
+{
+    // Enable trapping for division by zero
+#ifdef FOR_LINUX
+    if (feenableexcept(FE_DIVBYZERO) != 0) {
+        perror("feenableexcept failed");
+        exit(-1);
+    }
+#endif
+    if (clp.nFilters > CV_CN_MAX)
+        throw std::runtime_error("too many filters");
+    if (clp.dWmin > 0.)
+        throw std::runtime_error("weight cannot be 0");
+    ofstream ofslog("UnsupervisedFilters2.log.csv");
+    ofstream ofsdetlog("UnsupervisedFilters2.detlog.csv");
+    vector<Mat> vmat_ret;
+    int typeInput = vmat_Maps.front().type();
+    cout << "Determine saturation levels...\n";
+
+    vector<float> vr_perChannelSaturationLevel(vmat_Maps.front().channels());
+    DetermineperChannelSaturationLevel(vmat_Maps, vr_perChannelSaturationLevel);
+
+    cout << "Normalizing maps...\n";
+
+    for (auto &tensor: vmat_Maps) 
+        Normalize(tensor, vr_perChannelSaturationLevel);
+
+    double dw = -clp.dWmin * (clp.dWmax - clp.dWmin) / clp.dWmax;
+    vector<int> vind_ran(vmat_Maps.size());
+    for (int i = 0; i < vind_ran.size(); ++i)
+            vind_ran[i] = i;
+    mt19937 g(300);
+    shuffle(vind_ran.begin(), vind_ran.end(), g);
+    vector<Mat> vmat_FiltersW;
+    vector<Mat> vmat_FiltersR;
+    int nInputChannels = vmat_Maps.front().channels();
+    int typeConvolutions = CV_32FC(clp.nFilters);
+    int nInputValuesperFilter = clp.FilterSize * clp.FilterSize * nInputChannels;
+    for (int i = 0; i < clp.nFilters; ++i) {
+        vmat_FiltersW.push_back(Mat(clp.FilterSize, clp.FilterSize, typeInput));
+        vmat_FiltersR.push_back(Mat(clp.FilterSize, clp.FilterSize, typeInput));
+        vmat_FiltersW.back() = 0.;
+        auto *pr = vmat_FiltersR.back().ptr<float>(0);
+        fill(pr, pr + nInputValuesperFilter, (float)dw);
+    }
+    int outwidth = (vmat_Maps.front().cols - clp.FilterSize) / clp.Stride + 1;
+    int outheight = (vmat_Maps.front().rows - clp.FilterSize) / clp.Stride + 1;
+    int z = 0;
+    int WinnerRegionSize = 0 /* vclp_[Layer].FilterSize / 4 */;
+    vector<bool> vb_SpontaneousFiring(clp.nFilters, false);
+    for (auto ind: vind_ran) {
+        const Mat &matin = vmat_Maps[ind];
+        Mat matConv(outheight, outwidth, typeConvolutions, 0.);
+        vector<pair<float, convcoo> > vprcc_(2 * outheight * outwidth * clp.nFilters);   // *2 since 2 interchanging buffers will be used
+        convcoo cc;
+        pair<float, convcoo> *pprcc_ = &vprcc_.front();
+        pair<float, convcoo> *pprcc_new = pprcc_ + outheight * outwidth * clp.nFilters;
+        int cnt = 0;
+        int yfilter = 0;
+        for (cc.usy = 0; cc.usy < outheight; ++cc.usy) {
+            int xfilter = 0;
+            for (cc.usx = 0; cc.usx < outwidth; ++cc.usx) {
+                vector<float> vr_(clp.nFilters);
+                for (cc.usindFilter = 0; cc.usindFilter < clp.nFilters; ++cc.usindFilter) {
+                    float r = (float)vmat_FiltersW[cc.usindFilter].dot(Mat(matin, Rect(xfilter, yfilter, clp.FilterSize, clp.FilterSize)));
+                    vr_[cc.usindFilter] = r;
+                    pprcc_[cnt++] = make_pair(r, cc);
+                }
+                SetMultichannelPixel(matConv, cc.usy, cc.usx, vr_);
+                xfilter += clp.Stride;
+            }
+            yfilter += clp.Stride;
+        }
+        sort(pprcc_, pprcc_ + cnt);
+        vector<bool> vb_WeightCorrected(clp.nFilters, false);
+        int zForced = 0;
+        int zSpontaneous = 0;
+        int zNoCorrection = 0;
+        do {
+            auto i = pprcc_ + cnt - 1;
+            while (i != pprcc_ && (i - 1)->first == pprcc_[cnt - 1].first)
+                --i;
+            if (i != pprcc_ + cnt - 1)
+                i += uniform_int_distribution<int>(0, (int)(pprcc_ + cnt - i - 1))(g);
+            bool bModifyWeights = !vb_WeightCorrected[i->second.usindFilter];
+            vb_WeightCorrected[i->second.usindFilter] = true;
+            if (bModifyWeights) {
+                const Mat matWinner(matin, Rect(i->second.usx * clp.Stride, i->second.usy * clp.Stride, clp.FilterSize, clp.FilterSize));
+                if (i->first < 1.) {
+                    int nPotentiated = 0;
+                    for (int r = 0; r < matWinner.rows; ++r) {
+                        const auto *ptr = matWinner.ptr<float>(r);
+                        for (int c = 0; c < matWinner.cols * nInputChannels; ++c)
+                            if (ptr[c] > rBrightnessThreshold)
+                                ++nPotentiated;
+                    }
+                    if (nPotentiated && nPotentiated < nInputValuesperFilter) {
+                        double dDepression = clp.dLearningRate * nPotentiated / (nInputValuesperFilter - nPotentiated);
+                        for (int r = 0; r < vmat_FiltersW[i->second.usindFilter].rows; ++r) {
+                            auto *prW = vmat_FiltersW[i->second.usindFilter].ptr<float>(r);
+                            auto *prR = vmat_FiltersR[i->second.usindFilter].ptr<float>(r);
+                            const auto *ptr = matWinner.ptr<float>(r);
+                            for (int c = 0; c < clp.FilterSize * nInputChannels; ++c) {
+                                prR[c] += (float)(ptr[c] > rBrightnessThreshold ? clp.dLearningRate : -dDepression);
+                                prW[c] = (float)(clp.dWmin + (clp.dWmax - clp.dWmin) * max(prR[c], 0.F) / (clp.dWmax - clp.dWmin + max(prR[c], 0.F)));
+                            }
+                        }
+                        ++zForced;
+                    } else ++zNoCorrection;
+                } else {
+                    vb_SpontaneousFiring[i->second.usindFilter] = true;
+                    map<double, vector<pair<int, int> > > WinnerPixels;
+                    for (int r = 0; r < matWinner.rows; ++r) {
+                        const auto *ptr = matWinner.ptr<float>(r);
+                        for (int c = 0; c < matWinner.cols * nInputChannels; ++c)
+                            WinnerPixels[ptr[c]].push_back(make_pair(r, c));
+                    }
+                    double dPotential = 0.;
+                    auto m = WinnerPixels.rbegin();
+                    int nPotentiated = 0;
+                    while (dPotential < 1.) {
+                        nPotentiated += (int)m->second.size();
+                        for (auto n: m->second) {
+                            auto oW = vmat_FiltersW[i->second.usindFilter].ptr<float>(n.first) + n.second;
+                            auto oR = vmat_FiltersR[i->second.usindFilter].ptr<float>(n.first) + n.second;
+                            dPotential += m->first * *oW;
+                            *oR += (float)clp.dLearningRate;
+                            *oW = (float)(clp.dWmin + (clp.dWmax - clp.dWmin) * max(*oR, 0.F) / (clp.dWmax - clp.dWmin + max(*oR, 0.F)));
+                        }
+                        ++m;
+                    }
+                    double dDepression = clp.dLearningRate * nPotentiated / (nInputValuesperFilter - nPotentiated);
+                    while (m != WinnerPixels.rend()) {
+                        for (auto n: m->second) {
+                            auto oW = vmat_FiltersW[i->second.usindFilter].ptr<float>(n.first) + n.second;
+                            auto oR = vmat_FiltersR[i->second.usindFilter].ptr<float>(n.first) + n.second;
+                            *oR -= (float)dDepression;
+                            *oW = (float)(clp.dWmin + (clp.dWmax - clp.dWmin) * max(*oR, 0.F) / (clp.dWmax - clp.dWmin + max(*oR, 0.F)));
+                        }
+                        ++m;
+                    }
+                    ++zSpontaneous;
+                }
+            }
+            int cntnew = 0;
+            for (int l = 0; l < cnt; ++l)
+                if (abs((int)i->second.usx - (int)pprcc_[l].second.usx) > WinnerRegionSize || abs((int)i->second.usy - (int)pprcc_[l].second.usy) > WinnerRegionSize)   // Возможно, здесь проверить не на точное совпадение, а на сильное наложение...
+                    pprcc_new[cntnew++] = pprcc_[l];
+            swap(pprcc_, pprcc_new);
+            cnt = cntnew;
+        } while (cnt && pprcc_[cnt - 1].first >= 0. && find(vb_WeightCorrected.begin(), vb_WeightCorrected.end(), false) != vb_WeightCorrected.end());
+        if (!(++z % 10000))
+            cout << z << " images processed\n";
+    }
+    for (int i = 0; i < clp.nFilters; ++i)
+        if (vb_SpontaneousFiring[i]) 
+            vmat_ret.push_back(vmat_FiltersW[i]);
+    cout << vmat_ret.size() << " filters obtained\n";
+    return vmat_ret;
 }

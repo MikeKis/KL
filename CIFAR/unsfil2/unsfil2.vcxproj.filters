@@ -15,16 +15,8 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="UnsupervisedFiltersMultiple.cpp">
+    <ClCompile Include="unsfil2.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="rGetOptimumSparsitySaturationLevel10.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="UnsupervisedFiltersMultiple.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
   </ItemGroup>
 </Project>
