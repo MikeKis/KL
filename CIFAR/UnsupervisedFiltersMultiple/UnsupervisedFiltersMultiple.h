@@ -30,3 +30,30 @@ template<class T> void SetMultichannelPixel(cv::Mat &mat, int r, int c, const st
 float rGetOptimumSparsitySaturationLevel10(const std::vector<float> &vr_, float &rResultingSparsity, float &rResultingSparsityBoost);
 const int maxnSpikesPerObject = 10;
 const float rBrightnessThreshold = 1.F / maxnSpikesPerObject;
+
+template<class T> void SaveFilters(const std::vector<std::vector<cv::Mat> > &vvmat_Filters, const char *pchFile)
+{
+	std::ofstream ofs(pchFile);
+	int Layer = 0;
+	for (const auto &j: vvmat_Filters) {
+        ofs << "*** LAYER " << Layer++ << std::endl;
+		for (const auto &i: j) {
+            for (int r = 0; r < i.rows; ++r) {
+                const auto *pin = i.ptr<T>(r);
+                for (int c = 0; c < i.cols; ++c) {
+                    if (c)
+                        ofs << ',';
+                    ofs << '(';
+                    for (int cha = 0; cha < i.channels(); ++cha) {
+                        if (cha)
+                            ofs << ',';
+                        ofs << *pin++;
+                    }
+                    ofs << ')';
+                }
+                ofs << std::endl;
+            }
+			ofs << std::endl;
+		}
+	}
+}

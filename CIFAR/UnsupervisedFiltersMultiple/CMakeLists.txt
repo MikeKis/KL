@@ -13,6 +13,7 @@ source_group("Header Files" FILES ${Header_Files})
 
 set(Source_Files
     "UnsupervisedFiltersMultiple.cpp"
+    "rGetOptimumSparsitySaturationLevel10.cpp"
 )
 source_group("Source Files" FILES ${Source_Files})
 
@@ -35,6 +36,11 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
     INTERPROCEDURAL_OPTIMIZATION            "TRUE"
+)
+
+target_include_directories(${PROJECT_NAME} PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    ${OpenCV_INCLUDE_DIRS}
 )
 
 ################################################################################

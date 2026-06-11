@@ -9,33 +9,6 @@
 using namespace std;
 using namespace cv;
 
-void SaveFilters(const vector<vector<Mat> > &vvmat_Filters, const char *pchFile)
-{
-	ofstream ofs(pchFile);
-	int Layer = 0;
-	for (const auto &j: vvmat_Filters) {
-        ofs << "*** LAYER " << Layer++ << endl;
-		for (const auto &i: j) {
-            for (int r = 0; r < i.rows; ++r) {
-                const auto *pin = i.ptr<double>(r);
-                for (int c = 0; c < i.cols; ++c) {
-                    if (c)
-                        ofs << ',';
-                    ofs << '(';
-                    for (int cha = 0; cha < i.channels(); ++cha) {
-                        if (cha)
-                            ofs << ',';
-                        ofs << *pin++;
-                    }
-                    ofs << ')';
-                }
-                ofs << endl;
-            }
-			ofs << endl;
-		}
-	}
-}
-
 // unsigned char ucGetBrightnessQuantileValue(const vector<Mat> &vmat_Images, float rBrightnessThresholdQuantile)
 // {
 // 	const int SampleSize = 30000;
@@ -434,10 +407,12 @@ std::vector<cv::Mat> vmat_UnsupervisedFilters(std::vector<cv::Mat> &vmat_Maps, c
 {
     // Enable trapping for division by zero
 #ifdef FOR_LINUX
-    if (feenableexcept(FE_DIVBYZERO) != 0) {
+    static bool bDiv0Enabled = false;
+    if (!bDiv0Enabled && feenableexcept(FE_DIVBYZERO) != 0) {
         perror("feenableexcept failed");
         exit(-1);
     }
+    bDiv0Enabled = true;
 #endif
     if (clp.nFilters > CV_CN_MAX)
         throw std::runtime_error("too many filters");
