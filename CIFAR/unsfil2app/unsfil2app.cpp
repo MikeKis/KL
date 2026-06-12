@@ -117,20 +117,27 @@ int main()
     vector<vector<unsigned char> > vvuc_(vmat_.size(), vector<unsigned char>(NewMapnValues0 + NewMapnValues1 + MapnValues2));
     i = 0;
     for (size_t imageIndex = 0; imageIndex < vmat_.size(); ++imageIndex) 
-        for (int j = 0; j < NewMapnValues0; ++j) 
-            vvuc_[imageIndex][j] = (unsigned char)(10 * min(1.F, vr_Flat[i++] / rsatlev));
+        for (int j = 0; j < NewMapnValues0; ++j) {
+            vvuc_[imageIndex][j] = vr_Flat[i] > 0.F ? (unsigned char)(10 * min(1.F, vr_Flat[i] / rsatlev)) : 0;
+            ++i;
+        }
     vr_Flat.clear();
+    vr_Flat.shrink_to_fit();
     cout << "Convolving scale 2 images....\n";
     vr_Flat.reserve(vmat_.size() * NewMapSize1 * NewMapSize1 * vvmat_Filters[1].size());
     for (size_t imageIndex = 0; imageIndex < vmat_2.size(); ++imageIndex)
         vmat_ConvolutionsReLU[imageIndex] = ConvolveImageReLU(vmat_2[imageIndex], vvmat_Filters[1], vr_Flat);
     vmat_ConvolutionsReLU.clear();
+    vmat_ConvolutionsReLU.shrink_to_fit();
     rsatlev = rGetOptimumSparsitySaturationLevel10(vr_Flat, rResultingSparsity, rResultingSparsityBoost);
     i = 0;
     for (size_t imageIndex = 0; imageIndex < vmat_2.size(); ++imageIndex)
-        for (int j = 0; j < NewMapnValues1; ++j)
-            vvuc_[imageIndex][NewMapnValues0 + j] = (unsigned char)(10 * min(1.F, vr_Flat[i++] / rsatlev));
+        for (int j = 0; j < NewMapnValues1; ++j) {
+            vvuc_[imageIndex][NewMapnValues0 + j] = vr_Flat[i] > 0.F ? (unsigned char)(10 * min(1.F, vr_Flat[i] / rsatlev)) : 0;
+            ++i;
+        }
     vr_Flat.clear();
+    vr_Flat.shrink_to_fit();
     cout << "Converting to spikes scale 4 images....\n";
     vr_Flat.reserve(vmat_4.size() * MapnValues2);
     for (size_t imageIndex = 0; imageIndex < vmat_4.size(); ++imageIndex)
@@ -146,6 +153,7 @@ int main()
         for (int j = 0; j < MapnValues2; ++j)
             vvuc_[imageIndex][NewMapnValues0 + NewMapnValues1 + j] = (unsigned char)(10 * min(1.F, vr_Flat[i++] / rsatlev));
     vr_Flat.clear();
+    vr_Flat.shrink_to_fit();
     ofstream ofs(pchOutput);
     for (const auto &k: vvuc_) 
         for (int j = 0; j < k.size(); ++j)
