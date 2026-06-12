@@ -50,21 +50,24 @@ Mat ConvolveImageReLU(const Mat &image, const vector<Mat> &filters, vector<float
 
 int main()
 {
-    ifstream ifs(pchInput, ios::binary);
     vector<Mat> vmat_;
     vector<double> vd_(offsetinImage1 / sizeof(double));
     vector<float> vr_(vd_.size());
     cout << "Reading input data....\n";
     int i = 0;
-    while (true) {
-        ifs.seekg(nbytesperImage * i++);
-        if (!ifs.read((char*)&vd_.front(), offsetinImage1).good())
-            break;
-        for (int j = 0; j < vd_.size(); ++j)
-            vr_[j] = (float)vd_[j];
-        Mat mat(MapSize0, MapSize0, CV_32FC(2 * nFiltersperScale), &vr_.front());
-        vmat_.push_back(mat.clone());
+    {
+        ifstream ifs(pchInput, ios::binary);
+        while (true) {
+            ifs.seekg(nbytesperImage * i++);
+            if (!ifs.read((char*)&vd_.front(), offsetinImage1).good())
+                break;
+            for (int j = 0; j < vd_.size(); ++j)
+                vr_[j] = (float)vd_[j];
+            Mat mat(MapSize0, MapSize0, CV_32FC(2 * nFiltersperScale), &vr_.front());
+            vmat_.push_back(mat.clone());
+        }
     }
+    ifstream ifs(pchInput, ios::binary);
     int nImagesUsed = (int)vmat_.size();
     vector<Mat> vmat_2(nImagesUsed);
     vd_.resize((offsetinImage2 - offsetinImage1) / sizeof(double));
