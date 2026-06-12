@@ -565,3 +565,5 @@ std::vector<cv::Mat> vmat_UnsupervisedFilters(std::vector<cv::Mat> &vmat_Maps, c
     cout << vmat_ret.size() << " filters obtained\n";
     return vmat_ret;
 }
+
+template<> Mat matctor<float>(int size, int nchannels) {return Mat(size, size, CV_32FC(nchannels));}

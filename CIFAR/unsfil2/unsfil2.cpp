@@ -33,10 +33,10 @@ int main(int ARGC, char* ARGV[])
             cout << "Unexpected end of input file!\n";
             exit(-1);
         }
-	for (int j = 0; j < vd_.size(); ++j)
-	    vr_[j] = (float)vd_[j];
+	    for (int j = 0; j < vd_.size(); ++j)
+	        vr_[j] = (float)vd_[j];
         Mat mat(MapSize0, MapSize0, CV_32FC(2 * nFiltersperScale), &vr_.front());
-	vmat_[i] = mat.clone();
+	    vmat_[i] = mat.clone();
     }
     ConvolutionalLayerProperties clp{3, 100, 1. / (vmat_.size() / 3), -0.3, 1.};
     auto vmat_Filters0 = vmat_UnsupervisedFilters(vmat_, clp);   // vmat_ will be normalized in place
@@ -49,10 +49,10 @@ int main(int ARGC, char* ARGV[])
             cout << "Unexpected end of input file!\n";
             exit(-1);
         }
-	for (int j = 0; j < vd_.size(); ++j)
-	    vr_[j] = (float)vd_[j];
+	    for (int j = 0; j < vd_.size(); ++j)
+	        vr_[j] = (float)vd_[j];
         Mat mat(MapSize1, MapSize1, CV_32FC(2 * nFiltersperScale), &vr_.front());
-	vmat_[i] = mat.clone();
+	    vmat_[i] = mat.clone();
     }
     auto vmat_Filters1 = vmat_UnsupervisedFilters(vmat_, clp);   // vmat_ will be normalized in place
     SaveFilters<float>(vector<vector<cv::Mat> >{vmat_Filters0, vmat_Filters1}, pchOutput);
