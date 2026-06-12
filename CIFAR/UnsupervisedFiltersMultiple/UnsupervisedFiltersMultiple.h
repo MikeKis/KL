@@ -63,7 +63,6 @@ template<class T> void LoadFilters(std::vector<std::vector<cv::Mat> > &vvmat_Fil
 {
     vvmat_Filters.clear();
     std::ifstream ifs(pchFile);
-    int Layer = 0;
     std::string s;
     if (!std::getline(ifs, s).good()) {
         std::cout << "Unexpected end of input file!\n";
@@ -103,5 +102,5 @@ template<class T> void LoadFilters(std::vector<std::vector<cv::Mat> > &vvmat_Fil
                 exit(-1);
             }
         }
-    } while (std::getline(ifs, s).good());
+    } while (ifs.good());
 }
