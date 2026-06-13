@@ -72,7 +72,7 @@ Mat matSaturatedSumPooling(const Mat &mat, float rSaturationLevel, int PoolingSi
     int height = mat.rows / 2;
     int width = mat.cols / 2;
     int ncha = mat.channels();
-    Mat matret(height, width, CV_8UC(ncha), 0);
+    Mat matret(height, width, CV_8UC(ncha), Scalar::all(0));
     for (int y = 0, yin = 0; y < height; ++y, yin += PoolingSize) {
         auto *pout = matret.ptr<unsigned char>(y);
         for (int x = 0, xin = 0; x < width; ++x, xin += PoolingSize) {
