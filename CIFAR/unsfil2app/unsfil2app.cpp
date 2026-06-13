@@ -57,10 +57,14 @@ void SaturatedSumPoolingAt(const Mat &mat, float rSaturationLevel, int PoolingSi
         const auto *pin = patch.ptr<float>(r);
         for (int c = 0; c < PoolingSize; ++c)
             for (int cha = 0; cha < mat.channels(); ++cha) {
-                if (pucres[cha] < (unsigned)maxnSpikes) {
+                if (*pin && pucres[cha] < (unsigned)maxnSpikes) {
                     if (*pin >= rSaturationLevel)
                         pucres[cha] = (unsigned char)maxnSpikes;
-                    else pucres[cha] += (unsigned)(maxnSpikes * *pin / rSaturationLevel);
+                    else {
+                        pucres[cha] += (unsigned)(maxnSpikes * *pin / rSaturationLevel);
+                        if (pucres[cha] > (unsigned)maxnSpikes)
+                            pucres[cha] = (unsigned char)maxnSpikes;
+                    }
                 }
                 ++pin;
             }
