@@ -25,12 +25,12 @@ const size_t nbytesperImage = offsetinImage2 + MapnValues2 * sizeof(double);
 
 double DotConvolutionAt(const Mat &image, const Mat &filter, int x, int y)
 {
-    const cv::Rect roi(x, y, filter.cols, filter.rows);
-    cv::Mat patch = image(roi);
+    const Rect roi(x, y, filter.cols, filter.rows);
+    const Mat patch = image(roi);
     return filter.dot(patch);
 }
 
-Mat ConvolveImageReLU(const Mat &image, const vector<Mat> &filters, vector<float> &vr_Flat, int stride = 1)
+Mat matConvolveImageReLU(const Mat &image, const vector<Mat> &filters, vector<float> &vr_Flat, int stride = 1)
 {
     int height = (image.rows - filters.front().rows) / stride + 1;
     int width = (image.cols - filters.front().cols) / stride + 1;
@@ -44,6 +44,41 @@ Mat ConvolveImageReLU(const Mat &image, const vector<Mat> &filters, vector<float
                 *pout++ = std::max(value, 0.0F);
                 vr_Flat.push_back(value);
             }
+    }
+    return matret;
+}
+
+void SaturatedSumPoolingAt(const Mat &mat, float rSaturationLevel, int PoolingSize, int maxnSpikes, int x, int y, unsigned char *pucres)
+{
+    const Rect roi(x, y, PoolingSize, PoolingSize);
+    const Mat patch = mat(roi);
+    memset(pucres, 0, mat.channels());
+    for (int r = 0; r < PoolingSize; ++r) {
+        const auto *pin = patch.ptr<float>(r);
+        for (int c = 0; c < PoolingSize; ++c)
+            for (int cha = 0; cha < mat.channels(); ++cha) {
+                if (pucres[cha] < (unsigned)maxnSpikes) {
+                    if (*pin >= rSaturationLevel)
+                        pucres[cha] = (unsigned char)maxnSpikes;
+                    else pucres[cha] += (unsigned)(maxnSpikes * *pin / rSaturationLevel);
+                }
+                ++pin;
+            }
+    }
+}
+
+Mat matSaturatedSumPooling(const Mat &mat, float rSaturationLevel, int PoolingSize = 2, int maxnSpikes = 10)
+{
+    int height = mat.rows / 2;
+    int width = mat.cols / 2;
+    int ncha = mat.channels();
+    Mat matret(height, width, CV_8UC(ncha), 0);
+    for (int y = 0, yin = 0; y < height; ++y, yin += PoolingSize) {
+        auto *pout = matret.ptr<unsigned char>(y);
+        for (int x = 0, xin = 0; x < width; ++x, xin += PoolingSize) {
+            SaturatedSumPoolingAt(mat, rSaturationLevel, PoolingSize, maxnSpikes, xin, yin, pout);
+            pout += ncha;
+        }
     }
     return matret;
 }
@@ -109,37 +144,28 @@ int main()
     int NewMapSize1 = MapSize1 - vvmat_Filters[1].front().rows + 1;
     int NewMapnValues0 = (int)(NewMapSize0 * NewMapSize0 * vvmat_Filters[0].size());
     int NewMapnValues1 = (int)(NewMapSize1 * NewMapSize1 * vvmat_Filters[1].size());
-    vr_Flat.reserve(vmat_.size() * NewMapSize0 * NewMapSize0 * vvmat_Filters[0].size());
-    for (size_t imageIndex = 0; imageIndex < vmat_.size(); ++imageIndex)
-        vmat_ConvolutionsReLU[imageIndex] = ConvolveImageReLU(vmat_[imageIndex], vvmat_Filters[0], vr_Flat);
+    vr_Flat.reserve(vmat_.size() * NewMapnValues0);
+    for (size_t imageIndex = 0; imageIndex < vmat_.size(); ++imageIndex) 
+        vmat_ConvolutionsReLU[imageIndex] = matConvolveImageReLU(vmat_[imageIndex], vvmat_Filters[0], vr_Flat);
     float rResultingSparsity, rResultingSparsityBoost;
     float rsatlev = rGetOptimumSparsitySaturationLevel10(vr_Flat, rResultingSparsity, rResultingSparsityBoost);
-    vector<vector<unsigned char> > vvuc_(vmat_.size(), vector<unsigned char>(NewMapnValues0 + NewMapnValues1 + MapnValues2));
-    i = 0;
-    for (size_t imageIndex = 0; imageIndex < vmat_.size(); ++imageIndex) 
-        for (int j = 0; j < NewMapnValues0; ++j) {
-            vvuc_[imageIndex][j] = vr_Flat[i] > 0.F ? (unsigned char)(10 * min(1.F, vr_Flat[i] / rsatlev)) : 0;
-            ++i;
-        }
     vr_Flat.clear();
     vr_Flat.shrink_to_fit();
+    vector<array<Mat, 3> > vamat_(vmat_.size());
+    for (size_t imageIndex = 0; imageIndex < vmat_.size(); ++imageIndex)
+        vamat_[imageIndex][0] = matSaturatedSumPooling(vmat_ConvolutionsReLU[imageIndex], rsatlev);
     cout << "Convolving scale 2 images....\n";
-    vr_Flat.reserve(vmat_.size() * NewMapSize1 * NewMapSize1 * vvmat_Filters[1].size());
+    vr_Flat.reserve(vmat_.size() * NewMapnValues1);
     for (size_t imageIndex = 0; imageIndex < vmat_2.size(); ++imageIndex)
-        vmat_ConvolutionsReLU[imageIndex] = ConvolveImageReLU(vmat_2[imageIndex], vvmat_Filters[1], vr_Flat);
-    vmat_ConvolutionsReLU.clear();
-    vmat_ConvolutionsReLU.shrink_to_fit();
+        vmat_ConvolutionsReLU[imageIndex] = matConvolveImageReLU(vmat_2[imageIndex], vvmat_Filters[1], vr_Flat);
     rsatlev = rGetOptimumSparsitySaturationLevel10(vr_Flat, rResultingSparsity, rResultingSparsityBoost);
-    i = 0;
-    for (size_t imageIndex = 0; imageIndex < vmat_2.size(); ++imageIndex)
-        for (int j = 0; j < NewMapnValues1; ++j) {
-            vvuc_[imageIndex][NewMapnValues0 + j] = vr_Flat[i] > 0.F ? (unsigned char)(10 * min(1.F, vr_Flat[i] / rsatlev)) : 0;
-            ++i;
-        }
+    for (size_t imageIndex = 0; imageIndex < vmat_.size(); ++imageIndex)
+        vamat_[imageIndex][1] = matSaturatedSumPooling(vmat_ConvolutionsReLU[imageIndex], rsatlev);
+    vmat_ConvolutionsReLU.clear();
     vr_Flat.clear();
     vr_Flat.shrink_to_fit();
     cout << "Converting to spikes scale 4 images....\n";
-    vr_Flat.reserve(vmat_4.size() * MapnValues2);
+    vr_Flat.reserve(vmat_.size() * MapnValues2);
     for (size_t imageIndex = 0; imageIndex < vmat_4.size(); ++imageIndex)
         for (int r = 0; r < MapSize2; ++r) {
             const auto *pin = vmat_4[imageIndex].ptr<float>(r);
@@ -148,14 +174,24 @@ int main()
                     vr_Flat.push_back(*pin++);
         }
     rsatlev = rGetOptimumSparsitySaturationLevel10(vr_Flat, rResultingSparsity, rResultingSparsityBoost);
-    i = 0;
-    for (size_t imageIndex = 0; imageIndex < vmat_4.size(); ++imageIndex)
-        for (int j = 0; j < MapnValues2; ++j)
-            vvuc_[imageIndex][NewMapnValues0 + NewMapnValues1 + j] = (unsigned char)(10 * min(1.F, vr_Flat[i++] / rsatlev));
+    for (size_t imageIndex = 0; imageIndex < vmat_.size(); ++imageIndex)
+        vamat_[imageIndex][2] = matSaturatedSumPooling(vmat_4[imageIndex], rsatlev);
     vr_Flat.clear();
     vr_Flat.shrink_to_fit();
     ofstream ofs(pchOutput);
-    for (const auto &k: vvuc_) 
-        for (int j = 0; j < k.size(); ++j)
-            ofs << (int)k[j] << (j < k.size() - 1 ? ',' : '\n');
+    bool bStarted = false;
+    for (const auto &k: vamat_) {
+        for (const auto &l: k)
+            for (int r = 0; r < l.rows; ++r) {
+                const auto *pin = l.ptr<unsigned char>(r);
+                for (int c = 0; c < l.cols; ++c)
+                    for (int cha = 0; cha < l.channels(); ++cha) {
+                        if (!bStarted)
+                            bStarted = true;
+                        else ofs << ',';
+                        ofs << (int)*pin++;
+                    }
+            }
+        ofs << endl;
+    }
 }
