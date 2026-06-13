@@ -183,8 +183,8 @@ int main()
     vr_Flat.clear();
     vr_Flat.shrink_to_fit();
     ofstream ofs(pchOutput);
-    bool bStarted = false;
     for (const auto &k: vamat_) {
+        bool bStarted = false;
         for (const auto &l: k)
             for (int r = 0; r < l.rows; ++r) {
                 const auto *pin = l.ptr<unsigned char>(r);
