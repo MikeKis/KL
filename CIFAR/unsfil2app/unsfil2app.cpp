@@ -9,7 +9,7 @@ using namespace cv;
 
 const char *pchInput = "CIFAR_1_2_4_scaled.bin";   // It contains non-negative convolutuions (after ReLU) with PCA filters (2 * filter count)
 const char *pchFilters = "CIFAR_1_2_scaled.filters.txt";
-const char *pchOutput = "CIFAR_2_level.nspikes.csv";
+const char *pchOutput = "CIFAR_2_level.csv";
 const int OriginalImageSize = 32;
 const int nInputChannels = 3;
 const int nFiltersperScale = 20;
