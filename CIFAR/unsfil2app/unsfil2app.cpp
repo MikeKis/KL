@@ -225,7 +225,7 @@ int main()
                         if (!bStarted)
                             bStarted = true;
                         else ofs << ',';
-                        ofs << (int)*pin++;
+                        ofs << *pin++;
                     }
             }
         ofs << endl;
