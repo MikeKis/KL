@@ -38,5 +38,8 @@ std::vector<MapSize> ComputeMapSizesForBanks(int imageWidth, int imageHeight,
 BankMapsForImage ConvolveImage(const cv::Mat &image, const std::vector<LoadedFilterBank> &banks,
                                const std::vector<MapSize> &mapSizesPerBankFilter);
 
+BankMapsForImage ConvolveImageSelect(const cv::Mat &image, const std::vector<LoadedFilterBank> &banks,
+                                     const std::vector<MapSize> &mapSizesPerBankFilter, bool useGpu, int device);
+
 ConvolutionRunResult RunConvolutions(const std::vector<cv::Mat> &images,
                                      const std::vector<LoadedFilterBank> &banks);

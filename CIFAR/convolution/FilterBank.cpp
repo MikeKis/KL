@@ -19,8 +19,8 @@ void RescaleFiters(std::vector<cv::Mat> &filters_out, const std::vector<cv::Mat>
 
 std::vector<LoadedFilterBank> LoadFilterBanks(const std::vector<std::string> &files, const std::vector<int> &strides, const std::vector<int> &scales)
 {
-    if (files.size() != strides.size()) {
-        throw std::invalid_argument("files and strides size mismatch");
+    if (files.size() != strides.size() || files.size() != scales.size()) {
+        throw std::invalid_argument("files, strides, and scales size mismatch");
     }
 
     std::vector<LoadedFilterBank> banks;

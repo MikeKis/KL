@@ -1,6 +1,7 @@
 #include "ConvolutionPipeline.h"
 
 #include "ConvolutionOutputWriter.h"
+#include "GpuConvolution.h"
 
 #include <algorithm>
 #include <iostream>
@@ -105,6 +106,13 @@ std::vector<VmaxEstimateResult> EstimateAllVmax(const std::vector<std::vector<do
 void RunConvolutionPipeline(const ConvolutionConfig &config, const char *configPath,
                             const std::vector<cv::Mat> &images, const std::vector<LoadedFilterBank> &banks)
 {
+    if (config.useGpu) {
+        EnsureCudaDevice(config.device);
+        std::cout << "Compute: GPU device=" << config.device << '\n';
+    } else {
+        std::cout << "Compute: CPU\n";
+    }
+
     const ConvolutionPipelineMetadata metadata =
         BuildPipelineMetadata(banks, config.inputWidth, config.inputHeight);
     const std::vector<std::size_t> vmaxSampleIndices =
@@ -119,7 +127,8 @@ void RunConvolutionPipeline(const ConvolutionConfig &config, const char *configP
                   << " (index " << imageIndex << ")\n";
 
         const BankMapsForImage imageMaps =
-            ConvolveImage(images[imageIndex], banks, metadata.mapSizesPerBankFilter);
+            ConvolveImageSelect(images[imageIndex], banks, metadata.mapSizesPerBankFilter, config.useGpu,
+                                config.device);
         AccumulateVmaxValues(imageMaps, valuesPerFilter);
     }
 
@@ -133,7 +142,8 @@ void RunConvolutionPipeline(const ConvolutionConfig &config, const char *configP
     for (std::size_t imageIndex = 0; imageIndex < images.size(); ++imageIndex) {
         std::cout << "Writing output: image " << (imageIndex + 1) << '/' << images.size() << '\n';
         const BankMapsForImage imageMaps =
-            ConvolveImage(images[imageIndex], banks, metadata.mapSizesPerBankFilter);
+            ConvolveImageSelect(images[imageIndex], banks, metadata.mapSizesPerBankFilter, config.useGpu,
+                                config.device);
         session.WriteImage(imageMaps);
     }
 

@@ -33,41 +33,47 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <CudaPath Condition="'$(CUDA_PATH)'!=''">$(CUDA_PATH)</CudaPath>
+    <CudaPath Condition="'$(CudaPath)'==''">C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.5</CudaPath>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>C:\SNN\opencv\build\include;$(VC_IncludePath);$(WindowsSDK_IncludePath);</IncludePath>
+    <IncludePath>C:\SNN\opencv\build\include;$(CudaPath)\include;$(VC_IncludePath);$(WindowsSDK_IncludePath);</IncludePath>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>C:\SNN\opencv\build\include;$(VC_IncludePath);$(WindowsSDK_IncludePath);</IncludePath>
+    <IncludePath>C:\SNN\opencv\build\include;$(CudaPath)\include;$(VC_IncludePath);$(WindowsSDK_IncludePath);</IncludePath>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;CONVOLUTION_HAS_CUDA=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(OPENCV_DIR)\..\..\include;..\third_party\tomlplusplus\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(OPENCV_DIR)\..\..\include;..\third_party\tomlplusplus\include;$(CudaPath)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>c:\SNN\opencv\build\x64\vc16\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>opencv_world481d.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>c:\SNN\opencv\build\x64\vc16\lib;$(CudaPath)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world481d.lib;cudart.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;CONVOLUTION_HAS_CUDA=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(OPENCV_DIR)\..\..\include;..\third_party\tomlplusplus\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(OPENCV_DIR)\..\..\include;..\third_party\tomlplusplus\include;$(CudaPath)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalLibraryDirectories>c:\SNN\opencv\build\x64\vc16\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>opencv_world481.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>c:\SNN\opencv\build\x64\vc16\lib;$(CudaPath)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world481.lib;cudart.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -80,6 +86,16 @@
     <ClCompile Include="..\RawImageLoader.cpp" />
     <ClCompile Include="..\SpikeProjector.cpp" />
     <ClCompile Include="..\VmaxEstimator.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="..\GpuConvolution.cu">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"$(CudaPath)\bin\nvcc.exe" -c "%(FullPath)" -o "$(IntDir)GpuConvolution.obj" -std=c++17 -DCONVOLUTION_HAS_CUDA=1 -I"$(CudaPath)\include" -I"C:\SNN\opencv\build\include" -I"..\third_party\tomlplusplus\include" -I".." -I"..\.." -Xcompiler "/MDd /EHsc /std:c++17"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"$(CudaPath)\bin\nvcc.exe" -c "%(FullPath)" -o "$(IntDir)GpuConvolution.obj" -std=c++17 -O2 -DCONVOLUTION_HAS_CUDA=1 -I"$(CudaPath)\include" -I"C:\SNN\opencv\build\include" -I"..\third_party\tomlplusplus\include" -I".." -I"..\.." -Xcompiler "/MD /EHsc /std:c++17"</Command>
+      <Outputs>$(IntDir)GpuConvolution.obj</Outputs>
+      <Message>Compiling GpuConvolution.cu with nvcc</Message>
+      <LinkObjects>true</LinkObjects>
+    </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\PCFilters\PCFilters.vcxproj">

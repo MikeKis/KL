@@ -100,6 +100,18 @@ ConvolutionConfig ParseConvolutionConfig(const char *configPath)
         throw std::runtime_error("projection.vmax_sample_size must be positive");
     }
 
+    if (const toml::table *compute = root["compute"].as_table()) {
+        config.useGpu = compute->get("use_gpu")->value_or(false);
+        if (const toml::node *deviceNode = compute->get("device")) {
+            config.device = static_cast<int>(deviceNode->value_or(0));
+        } else {
+            config.device = 0;
+        }
+        if (config.useGpu && config.device < 0) {
+            throw std::runtime_error("compute.device must be >= 0");
+        }
+    }
+
     const toml::table *output = root["output"].as_table();
     if (output == nullptr) {
         throw std::runtime_error("missing [output] section");

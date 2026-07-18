@@ -82,6 +82,12 @@ ConvolutionOutputSession::ConvolutionOutputSession(const ConvolutionConfig &conf
     logStream_ << "vmax_sample_count=" << vmaxSampleCount << '\n';
     logStream_ << "mode=" << ProjectionModeToString(config.projectionMode) << '\n';
     logStream_ << "criterion=" << config.projectionCriterion << '\n';
+    logStream_ << "use_gpu=" << (config.useGpu ? "true" : "false") << '\n';
+    if (config.useGpu) {
+        logStream_ << "device=" << config.device << '\n';
+    } else {
+        logStream_ << "device=cpu\n";
+    }
 
     for (const PhysicalFilterDescriptor &descriptor : filters_) {
         logStream_ << "map file=" << descriptor.sourceFile << " filter=" << descriptor.filterIndex

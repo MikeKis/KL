@@ -1,5 +1,7 @@
 #include "ConvolutionRunner.h"
 
+#include "GpuConvolution.h"
+
 #include <stdexcept>
 
 MapSize ComputeOutputMapSize(int imageWidth, int imageHeight, int filterWidth, int filterHeight, int stride)
@@ -93,6 +95,18 @@ BankMapsForImage ConvolveImage(const cv::Mat &image, const std::vector<LoadedFil
         }
     }
     return imageMaps;
+}
+
+BankMapsForImage ConvolveImageSelect(const cv::Mat &image, const std::vector<LoadedFilterBank> &banks,
+                                     const std::vector<MapSize> &mapSizesPerBankFilter, bool useGpu, int device)
+{
+    if (!useGpu) {
+        return ConvolveImage(image, banks, mapSizesPerBankFilter);
+    }
+    if (!IsConvolutionCudaBuilt()) {
+        throw std::runtime_error("use_gpu=true but convolution was built without CUDA support");
+    }
+    return ConvolveImageGpu(image, banks, mapSizesPerBankFilter, device);
 }
 
 ConvolutionRunResult RunConvolutions(const std::vector<cv::Mat> &images,

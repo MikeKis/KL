@@ -21,6 +21,8 @@
 - GUI, сеть, интеграция с симулятором SNN (только подготовка данных).
 - Поддержка форматов фильтров, отличных от PCFilters v1.
 - Изменение формата файлов PCFilters.
+- Пространственный tiling одного изображения на несколько GPU и multi-GPU вообще (возможно при переходе к большим кадрам).
+- Зависимость от OpenCV CUDA / cuDNN (только собственные CUDA-ядра).
 
 ## Функциональные требования
 
@@ -53,6 +55,10 @@ stride = 2
 mode = "def_sparsity"   # или "def_saturation"
 criterion = 2.0         # смысл зависит от mode (см. ниже)
 
+[compute]
+use_gpu = false         # true — считать свёртки на GPU (CUDA)
+device = 0              # номер одной CUDA-карты; игнорируется при use_gpu = false
+
 [output]
 convolutions_bin = "Workplace/conv_values.bin"
 spikes_csv = "Workplace/conv_spikes.csv"
@@ -74,6 +80,13 @@ log = "Workplace/convolution.log"
 | `output.spikes_csv` | 9. CSV спайков |
 | `output.log` | 10. Лог |
 
+Опциональные поля compute (значения по умолчанию):
+
+| Поле | По умолчанию | Назначение |
+|------|--------------|------------|
+| `compute.use_gpu` | `false` | Включить расчёт свёрток на GPU |
+| `compute.device` | `0` при `use_gpu = true` | Номер одной CUDA-карты (ordinal) |
+
 ### Входные изображения
 
 1. Формат как в `pcfilCIFAR` / `unsfil/unsfilc.cpp`: подряд без заголовка, каждое изображение — `width × height × channels` байт `uint8`, порядок каналов **interleaved** (как OpenCV `CV_8UCn`, в т.ч. `CV_8UC3` для CIFAR10.bin проекта).
@@ -87,6 +100,18 @@ log = "Workplace/convolution.log"
 - `projection.criterion` при `def_sparsity`: `0 ≤ criterion ≤ 10`.
 - `projection.criterion` при `def_saturation`: `0 < criterion ≤ 1` (доля).
 - `filters` — непустой массив; `stride ≥ 1` для каждой записи.
+- `compute.use_gpu` — булево; при отсутствии — `false`.
+- При `use_gpu = true`: `device` — целое `≥ 0`, устройство должно существовать (иначе фатальная ошибка).
+- При `use_gpu = false`: поле `device` игнорируется (можно не указывать).
+- При `use_gpu = true` и отсутствии `device` — использовать `0`.
+
+### Вычисления на CPU / GPU
+
+1. При `use_gpu = false` — свёртки на CPU (эталонная реализация).
+2. При `use_gpu = true` — свёртки (+/−, ReLU) выполняются на **одной** GPU через **собственные CUDA-ядра** (не OpenCV CUDA, не cuDNN). Подбор `Vmax`, проекция в спайки и запись файлов остаются на CPU.
+3. Multi-GPU и пространственный tiling одного кадра — **вне объёма** текущей версии; при необходимости (большие изображения) расширить отдельно.
+4. Если `use_gpu = true`, а CUDA недоступна при сборке или runtime / номер устройства невалиден — фатальная ошибка (не молчащий fallback на CPU).
+5. Числовые результаты GPU и CPU должны совпадать с точностью, достаточной для тех же целых спайков на типичных данных; допустимы мелкие float-расхождения до проекции (зафиксировать в тестах допуск или сравнение CSV).
 
 ### Фильтры и свёртка
 
@@ -135,7 +160,7 @@ log = "Workplace/convolution.log"
 | `def_sparsity` | `Vmax`, доля значений свёртки `> Vmax` |
 | `def_saturation` | `Vmax`, достигнутое среднее число спайков по всем свёрткам с этим фильтром |
 
-Дополнительно в начале лога: версия приложения, путь к конфигу, число изображений, режим, критерий, размеры карт.
+Дополнительно в начале лога: версия приложения, путь к конфигу, число изображений, режим, критерий, размеры карт, `use_gpu`, устройство (`device=N` или `cpu`).
 
 ### Выходные файлы
 
@@ -154,12 +179,12 @@ log = "Workplace/convolution.log"
 
 ## Нефункциональные требования
 
-- **Производительность**: полный проход по датасету в RAM; для CIFAR-10 (50k×32×32×3) и ~20 фильтров 3×3 целевое время — минуты на desktop CPU, без GPU.
-- **Память**: хранить все изображения и все карты свёрток в памяти допустимо (явное требование ТЗ); оценка пиковой памяти логировать в debug-сборке опционально.
-- **Потокобезопасность**: не требуется (однопоточное консольное приложение).
-- **Совместимость**: C++17, OpenCV (как в корневом `CMakeLists.txt`), Windows (MSVC) и Linux (GCC/Clang) при наличии CMake-сборки.
+- **Производительность**: полный проход по датасету в RAM; для CIFAR-10 (50k×32×32×3) и ~20 фильтров 3×3 целевое время — минуты на desktop CPU; при `use_gpu = true` — существенно быстрее на сопоставимой GPU.
+- **Память**: хранить все изображения и все карты свёрток в host RAM допустимо (явное требование ТЗ); на GPU — батчинг/streaming, чтобы не требовать размещения всего датасета в VRAM сразу.
+- **Потокобезопасность**: однопоточный host; один CUDA-контекст на выбранном `device`.
+- **Совместимость**: C++17, OpenCV Core (host), CUDA Toolkit + собственные `.cu` ядра; Windows (MSVC) и Linux (GCC/Clang). Сборка без CUDA должна давать рабочий CPU-режим; GPU — при наличии toolchain.
 - **Наблюдаемость**: основной отчёт — `output.log`; прогресс (опционально) — `stderr` при длительных прогонах.
-- **Зависимости конфига**: парсер TOML (header-only, например [toml++](https://github.com/marzer/tomlplusplus) MIT) — единственная новая внешняя библиотека для этого таргета.
+- **Зависимости конфига**: парсер TOML (header-only, например [toml++](https://github.com/marzer/tomlplusplus) MIT); для GPU — CUDA Toolkit (без обязательной зависимости от OpenCV CUDA / cuDNN).
 
 ## Принятые решения (закрытые вопросы)
 
@@ -173,16 +198,20 @@ log = "Workplace/convolution.log"
 | 6 | CSV: без заголовка; одна строка на изображение; значения через `,`. |
 | 7 | `Vmax` — перебор по уникальным значениям выборки. |
 | 8 | Проект `convolution` — CMake + **`convolution.vcxproj` в `CIFAR.sln`** (зависимость от `PCFilters`). |
+| 9 | GPU: в конфиге `compute.use_gpu` и `compute.device` (одна CUDA-карта); при `use_gpu = false` — только CPU. |
+| 10 | GPU-стек: **собственные CUDA-ядра** (не OpenCV CUDA, не cuDNN). |
+| 11 | Только **один** GPU в текущей версии; multi-GPU / tiling больших кадров — отложено. |
 
 ## Предполагаемые изменения в коде
 
 ### Новые классы / типы
 
-- `ConvolutionConfig` — структура с полями конфига после разбора TOML; валидация путей и диапазонов.
+- `ConvolutionConfig` — структура с полями конфига после разбора TOML (включая `use_gpu`, `device`); валидация путей и диапазонов.
 - `ConvolutionConfigParser` — чтение TOML → `ConvolutionConfig` (можно объединить с `ConvolutionConfig` как свободные функции в `ConvolutionConfig.cpp`).
 - `RawImageLoader` — чтение бинарного потока в `std::vector<cv::Mat>`.
 - `FilterBank` — один загруженный PCFilters-файл + `stride`.
-- `ConvolutionRunner` — свёртка +/-, ReLU, накопление значений для `Vmax`.
+- `ConvolutionRunner` — свёртка +/-, ReLU, накопление значений для `Vmax` (CPU).
+- `GpuConvolutionRunner` — GPU-путь на собственных CUDA-ядрах (те же семантика и порядок выхода); при `use_gpu = false` не используется.
 - `VmaxEstimator` — режимы `def_sparsity` / `def_saturation`.
 - `SpikeProjector` — линейная проекция в `[0, 10]`.
 - `ConvolutionOutputWriter` — бинарный поток, CSV, лог.
@@ -209,13 +238,14 @@ log = "Workplace/convolution.log"
 
 - **Новые**: toml++ (парсинг конфига), header-only, MIT.
 - **Существующие**: OpenCV Core (`cv::Mat`, dot product), статическая библиотека `PCFilters`.
-- **Toolchain**: CMake ≥ 3.14, C++17.
+- **GPU (опционально при сборке)**: CUDA Toolkit + собственные `.cu` ядра. OpenCV CUDA / cuDNN **не** требуются.
+- **Toolchain**: CMake ≥ 3.14, C++17; для GPU-сборки — NVCC / CUDA-capable MSVC toolchain.
 
 ## Критерии приёмки
 
 ### Автотесты
 
-- [ ] Юнит-тест: разбор минимального валидного TOML → ожидаемый `ConvolutionConfig`.
+- [ ] Юнит-тест: разбор минимального валидного TOML → ожидаемый `ConvolutionConfig` (в т.ч. `use_gpu` / `device` и defaults).
 - [ ] Юнит-тест: размер карты свёртки `(32, 3×3, stride=1) → 30×30`, `(32, 6×6, stride=2) → 14×14`.
 - [ ] Юнит-тест: ReLU и вторая полярность (`conv_minus` = ReLU(−conv_raw)).
 - [ ] Юнит-тест: `SpikeProjector` — границы `0`, `Vmax`, `> Vmax → 10`, округление.
@@ -223,6 +253,7 @@ log = "Workplace/convolution.log"
 - [ ] Интеграционный тест: 2–3 искусственных изображения 8×8, 1–2 фильтра 3×3 из тестового PCFilters-файла — сравнение bin/CSV с эталоном (golden files); CSV: число строк = числу изображений.
 - [ ] Ошибка при `max(V)=0` для фильтра — exit ≠ 0, выходные файлы отсутствуют.
 - [ ] Smoke: запуск на `Workplace/CIFAR10.bin` + `Workplace/PCFilters_3x3.txt`, оба режима, ненулевой exit code только при ошибке.
+- [ ] GPU (если есть CUDA): тот же маленький набор — CSV совпадает с CPU-эталоном; неверный `device` / `use_gpu` без CUDA → ошибка.
 
 ### Линтеры и качество
 
@@ -232,9 +263,10 @@ log = "Workplace/convolution.log"
 
 ## План внедрения (опционально)
 
-1. **PR1**: каркас `convolution`, TOML-конфиг, загрузка изображений и PCFilters, свёртка +/- без `Vmax`.
+1. **PR1**: каркас `convolution`, TOML-конфиг (включая `compute`), загрузка изображений и PCFilters, свёртка +/- на CPU без `Vmax`.
 2. **PR2**: `VmaxEstimator`, проекция, запись bin/CSV/log, smoke на Workplace.
-3. **PR3** (опционально): тесты, вынос общей свёртки с `UnsupervisedFiltersMultiple`.
+3. **PR3**: GPU-путь (`use_gpu`, `device`), сравнение с CPU на маленьком наборе.
+4. **PR4** (опционально / позже): тесты; multi-GPU или tiling для больших кадров — отдельная задача.
 
 ## Приложение: семантика режимов (формулы)
 

@@ -2,6 +2,7 @@
 #include "../ConvolutionPipeline.h"
 #include "../ConvolutionRunner.h"
 #include "../FilterBank.h"
+#include "../GpuConvolution.h"
 #include "../RawImageLoader.h"
 #include "../SpikeProjector.h"
 #include "../VmaxEstimator.h"
@@ -45,6 +46,8 @@ void TestConfigParse()
     ExpectTrue(config.projectionMode == ProjectionMode::DefSparsity, "projection mode");
     ExpectTrue(config.projectionCriterion == 2.0, "criterion");
     ExpectTrue(config.vmaxSampleSize == 3000, "default vmax sample size");
+    ExpectTrue(config.useGpu == false, "default use_gpu false");
+    ExpectTrue(config.device == 0, "default device 0");
 }
 
 void TestVmaxSampleIndices()
@@ -306,12 +309,60 @@ void TestGoldenIntegration()
     ExpectTrue(expectedCsv == actualCsv, "golden csv match");
 }
 
+void TestGpuConfigParse()
+{
+    const ConvolutionConfig config = ParseConvolutionConfig("testdata/minimal_gpu.toml");
+    ExpectTrue(config.useGpu == true, "use_gpu true");
+    ExpectTrue(config.device == 0, "device 0");
+}
+
+void TestGpuCpuSpikeMatch()
+{
+    if (!IsConvolutionCudaBuilt() || !IsCudaDeviceAvailable(0)) {
+        std::cout << "SKIP: TestGpuCpuSpikeMatch (no CUDA)\n";
+        return;
+    }
+
+    cv::Mat image(8, 8, CV_8UC1);
+    for (int y = 0; y < 8; ++y) {
+        for (int x = 0; x < 8; ++x) {
+            image.at<unsigned char>(y, x) = static_cast<unsigned char>(10 * y + x);
+        }
+    }
+    cv::Mat filter(3, 3, CV_32FC1);
+    for (int y = 0; y < 3; ++y) {
+        for (int x = 0; x < 3; ++x) {
+            filter.at<float>(y, x) = static_cast<float>(y - 1 + 0.1f * x);
+        }
+    }
+
+    LoadedFilterBank bank;
+    bank.stride = 1;
+    bank.filters.push_back(filter);
+    const std::vector<MapSize> sizes = ComputeMapSizesForBanks(8, 8, {bank});
+
+    const BankMapsForImage cpuMaps = ConvolveImage(image, {bank}, sizes);
+    const BankMapsForImage gpuMaps = ConvolveImageGpu(image, {bank}, sizes, 0);
+
+    const PolarMaps &cpu = cpuMaps.banks.front().filters.front();
+    const PolarMaps &gpu = gpuMaps.banks.front().filters.front();
+    double maxDiff = 0.0;
+    for (int y = 0; y < cpu.plus.rows; ++y) {
+        for (int x = 0; x < cpu.plus.cols; ++x) {
+            maxDiff = std::max(maxDiff, std::abs(cpu.plus.at<double>(y, x) - gpu.plus.at<double>(y, x)));
+            maxDiff = std::max(maxDiff, std::abs(cpu.minus.at<double>(y, x) - gpu.minus.at<double>(y, x)));
+        }
+    }
+    ExpectTrue(maxDiff < 1e-3, "GPU/CPU convolution values close");
+}
+
 } // namespace
 
 int main()
 {
     try {
         TestConfigParse();
+        TestGpuConfigParse();
         TestVmaxSampleIndices();
         TestOutputMapSize();
         TestReluPolarity();
@@ -323,6 +374,7 @@ int main()
         TestMultiFilterBanksPipeline();
         TestMultiFilterBanksIntegration();
         TestGoldenIntegration();
+        TestGpuCpuSpikeMatch();
     } catch (const std::exception &ex) {
         std::cerr << "convolution_test error: " << ex.what() << '\n';
         return 1;
