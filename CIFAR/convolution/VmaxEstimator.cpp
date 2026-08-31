@@ -6,57 +6,79 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <vector>
 
-using namespace std;
+namespace {
 
-const double dSparsityRelativeTolerance = 0.03;
-
-double dSaturationLevelfromSparsity(const std::vector<double> &vd_sorted, double dTargetMeanFiringFrequency)
+double SaturationFraction(const std::vector<double> &values, double vmax)
 {
-    double d = vd_sorted[vd_sorted.size() / 2];
-    double dhigh = d;
-    double dlow = d;
-    double dcri = MeanSpike(&vd_sorted.front(), vd_sorted.size(), d);
-    if (dcri < dTargetMeanFiringFrequency) {
-        double dlim = *upper_bound(vd_sorted.begin(), vd_sorted.end(), 0.);
-        do {
-            dlow *= 0.5;
-        } while (d > dlim && MeanSpike(&vd_sorted.front(), vd_sorted.size(), d) < dTargetMeanFiringFrequency);
-        if (d <= dlim)
-            throw std::runtime_error("sparsity criterion cannot be satisfied");
-    } else do {
-        dhigh *= 2;
-    } while (MeanSpike(&vd_sorted.front(), vd_sorted.size(), d) > dTargetMeanFiringFrequency);
-    const double dSparsityAbsoluteTolerance = dSparsityRelativeTolerance * dTargetMeanFiringFrequency;
-    do {
-        d = (dlow + dhigh) / 2;
-        dcri = MeanSpike(&vd_sorted.front(), vd_sorted.size(), d);
-        if (abs(dcri - dTargetMeanFiringFrequency) < dSparsityAbsoluteTolerance)
-            break;
-        if (dcri > dTargetMeanFiringFrequency)
-            dlow = d;
-        else dhigh = d;
-    } while (true);
-    return d;
+    std::size_t above = 0;
+    for (double value : values) {
+        if (value > vmax) {
+            ++above;
+        }
+    }
+    return static_cast<double>(above) / static_cast<double>(values.size());
 }
+
+std::vector<double> UniqueCandidates(std::vector<double> values)
+{
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+    return values;
+}
+
+} // namespace
 
 VmaxEstimateResult EstimateVmax(const std::vector<double> &values, ProjectionMode mode, double criterion)
 {
-
     if (values.empty()) {
         throw std::runtime_error("cannot estimate Vmax for empty value set");
     }
 
-    auto vd_ = values;
-    std::sort(vd_.begin(), vd_.end());
-    VmaxEstimateResult best;
-    if (mode == ProjectionMode::DefSparsity) {
-        best.vmax = dSaturationLevelfromSparsity(vd_, criterion);
-        best.saturationFraction = (vd_.end() - std::lower_bound(vd_.begin(), vd_.end(), best.vmax)) / (double)vd_.size();
-    } else {
-        int ind = (int)(vd_.size() * (1 - criterion));
-        best.vmax = ind < vd_.size() ? vd_[ind] : vd_.back();
-        best.meanSpike = MeanSpike(&vd_.front(), vd_.size(), best.vmax);
+    const double maxValue = *std::max_element(values.begin(), values.end());
+    if (maxValue <= 0.0) {
+        throw std::runtime_error("all convolution values are zero for a filter; cannot estimate Vmax");
     }
+
+    const std::vector<double> candidates = UniqueCandidates(values);
+    VmaxEstimateResult best;
+    best.vmax = candidates.back();
+    double bestError = std::numeric_limits<double>::infinity();
+
+    for (double candidate : candidates) {
+        if (candidate <= 0.0) {
+            continue;
+        }
+
+        double error = 0.0;
+        double meanSpike = 0.0;
+        double saturationFraction = 0.0;
+
+        if (mode == ProjectionMode::DefSparsity) {
+            meanSpike = MeanSpike(values.data(), values.size(), candidate);
+            saturationFraction = SaturationFraction(values, candidate);
+            error = std::abs(meanSpike - criterion);
+        } else {
+            saturationFraction = SaturationFraction(values, candidate);
+            meanSpike = MeanSpike(values.data(), values.size(), candidate);
+            error = std::abs(saturationFraction - criterion);
+        }
+
+        if (error < bestError) {
+            bestError = error;
+            best.vmax = candidate;
+            best.meanSpike = meanSpike;
+            best.saturationFraction = saturationFraction;
+        }
+    }
+
+    if (best.vmax <= 0.0) {
+        throw std::runtime_error("failed to find positive Vmax candidate");
+    }
+
+    // Recompute metrics at the chosen Vmax for consistency.
+    best.meanSpike = MeanSpike(values.data(), values.size(), best.vmax);
+    best.saturationFraction = SaturationFraction(values, best.vmax);
     return best;
 }

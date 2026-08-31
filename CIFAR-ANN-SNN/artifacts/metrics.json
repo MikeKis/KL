@@ -1,0 +1,9 @@
+{
+  "best_test_accuracy_pct": 83.88,
+  "folded_params": 28626,
+  "trainable_params_with_bn": 28762,
+  "epochs": 80,
+  "device": "cpu",
+  "seconds": 4962.7,
+  "seed": 42
+}

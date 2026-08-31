@@ -5,5 +5,7 @@ vmax_sample_size=3000
 vmax_sample_count=2
 mode=def_sparsity
 criterion=2
+use_gpu=false
+device=cpu
 map file=testdata/test_filters.txt filter=0 width=6 height=6
 filter file=testdata/test_filters.txt index=0 Vmax=100 saturation_fraction=0

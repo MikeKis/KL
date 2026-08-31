@@ -1,0 +1,64 @@
+{
+  "folded_params": 28626,
+  "within_budget": true,
+  "files": {
+    "architecture": "artifacts\\architecture.json",
+    "weights_npz": "artifacts\\weights.npz",
+    "weights_dump": "artifacts\\weights_dump.txt",
+    "checkpoint": "artifacts\\best.pt"
+  },
+  "tensor_shapes": {
+    "conv1.weight": [
+      16,
+      3,
+      3,
+      3
+    ],
+    "conv1.bias": [
+      16
+    ],
+    "conv2.weight": [
+      16,
+      16,
+      3,
+      3
+    ],
+    "conv2.bias": [
+      16
+    ],
+    "conv3.weight": [
+      32,
+      16,
+      3,
+      3
+    ],
+    "conv3.bias": [
+      32
+    ],
+    "conv4.weight": [
+      32,
+      32,
+      3,
+      3
+    ],
+    "conv4.bias": [
+      32
+    ],
+    "conv5.weight": [
+      40,
+      32,
+      3,
+      3
+    ],
+    "conv5.bias": [
+      40
+    ],
+    "fc.weight": [
+      10,
+      40
+    ],
+    "fc.bias": [
+      10
+    ]
+  }
+}
