@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Spec: 2026-09-10_ann-to-arni-snn.md ; runtime copy: C:\SNN\ArNI\Experiments\AnnToSNN.nnp -->
+<SNN model="$(PLASTICITY_MODEL)">
+  <RECEPTORS name="R">
+    <Implementation lib="fromFile">
+      <args type="image">
+        <source>$(RASTER_INPUT)</source>
+        <Special>
+          <width>$(XSIZE)</width>
+          <height>$(YSIZE)</height>
+          <nchannels>$(NCHANNELS)</nchannels>
+          <offset>$(OFFSET)</offset>
+          <ntact_per_image>$(PRESENTATION_PERIOD)</ntact_per_image>
+          <image_presentation_time>10</image_presentation_time>
+          <maxfrequency>$(MAXFREQUENCY)</maxfrequency>
+          <convolution_file>$(CONVOLUTION_FILE)</convolution_file>
+          <stride>1</stride>
+          <s>$(S)</s>
+          <bias>$(CONV1_BIAS)</bias>
+        </Special>
+      </args>
+    </Implementation>
+  </RECEPTORS>
+  <RECEPTORS name="Target" n="$(NTARGETCLASSES)">
+    <Implementation lib="ObjectClassifier">
+      <args>
+        <target_file>$(TARGET_FILE)</target_file>
+        <learning_time>$(LEARNING_TIME)</learning_time>
+        <object_presentation_period>$(PRESENTATION_PERIOD)</object_presentation_period>
+      </args>
+    </Implementation>
+  </RECEPTORS>
+  <NETWORK>
+    <Implementation lib="TinyfromANN">
+      <args>
+        <input>R</input>
+        <output>$(INPUT)</output>
+        <architecture>$(ARCHITECTURE)</architecture>
+        <weights>$(WEIGHTS)</weights>
+        <chartime>10</chartime>
+        <pool_chartime>1</pool_chartime>
+        <layer name="conv2">
+          <weight_scale>$(CONV2_WEIGHT_SCALE)</weight_scale>
+          <bias_scale>$(CONV2_BIAS_SCALE)</bias_scale>
+        </layer>
+        <layer name="conv3">
+          <weight_scale>$(CONV3_WEIGHT_SCALE)</weight_scale>
+          <bias_scale>$(CONV3_BIAS_SCALE)</bias_scale>
+        </layer>
+        <layer name="conv4">
+          <weight_scale>$(CONV4_WEIGHT_SCALE)</weight_scale>
+          <bias_scale>$(CONV4_BIAS_SCALE)</bias_scale>
+        </layer>
+        <layer name="conv5">
+          <weight_scale>$(CONV5_WEIGHT_SCALE)</weight_scale>
+          <bias_scale>$(CONV5_BIAS_SCALE)</bias_scale>
+        </layer>
+      </args>
+    </Implementation>
+  </NETWORK>
+\CoLaNET
+  <Readout lib="ObjectClassifier">
+    <output>$(OUTPUT)</output>
+  </Readout>
+</SNN>

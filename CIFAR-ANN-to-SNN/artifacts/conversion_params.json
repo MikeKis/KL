@@ -1,0 +1,200 @@
+{
+  "mode": "joint",
+  "experiment_id": "920",
+  "ann_accuracy_pct": 83.94,
+  "n_features": 40,
+  "conv1_out_receptors": 14400,
+  "spatial_steps": [
+    {
+      "name": "input",
+      "type": "input",
+      "h": 32,
+      "w": 32,
+      "c": 3
+    },
+    {
+      "name": "conv1",
+      "type": "Conv2d",
+      "h": 30,
+      "w": 30,
+      "c": 16
+    },
+    {
+      "name": "conv2",
+      "type": "Conv2d",
+      "h": 28,
+      "w": 28,
+      "c": 16
+    },
+    {
+      "name": "pool1",
+      "type": "AvgPool2d",
+      "h": 14,
+      "w": 14,
+      "c": 16
+    },
+    {
+      "name": "conv3",
+      "type": "Conv2d",
+      "h": 12,
+      "w": 12,
+      "c": 32
+    },
+    {
+      "name": "conv4",
+      "type": "Conv2d",
+      "h": 10,
+      "w": 10,
+      "c": 32
+    },
+    {
+      "name": "pool2",
+      "type": "AvgPool2d",
+      "h": 5,
+      "w": 5,
+      "c": 32
+    },
+    {
+      "name": "conv5",
+      "type": "Conv2d",
+      "h": 3,
+      "w": 3,
+      "c": 40
+    },
+    {
+      "name": "gap",
+      "type": "AdaptiveAvgPool2d",
+      "h": 1,
+      "w": 1,
+      "c": 40
+    }
+  ],
+  "params": {
+    "weight_scale": 1.0,
+    "bias_scale": 1.0,
+    "bias_to_stoch_stim_scale": 2.0,
+    "bias_to_threshold_scale": 1.0,
+    "synapse_scale": 1000.0,
+    "chartime": 10,
+    "pool_chartime": 1,
+    "tpres": 10,
+    "ntact_per_image": 15,
+    "ncalibrationimages": 0,
+    "s": 6.72904,
+    "maxfrequency": 1.0,
+    "n_train_images": 50000,
+    "ncopies": 15,
+    "layer_scales": {
+      "conv2": {
+        "weight_scale": 0.8466883169262213,
+        "bias_scale": 0.19665692853880432
+      },
+      "conv3": {
+        "weight_scale": 1.3645578703619359,
+        "bias_scale": 0.4194111821182826
+      },
+      "conv4": {
+        "weight_scale": 0.8003262493842107,
+        "bias_scale": 0.5246212297652064
+      },
+      "conv5": {
+        "weight_scale": 0.2008666900328339,
+        "bias_scale": 0.1646996130877847
+      }
+    },
+    "snn_model": "linearized",
+    "stochastic_stimulation": 0.115462,
+    "hebbian_plasticity": -0.412192,
+    "stability_resource_change_ratio": 0.00656263,
+    "minweight": -1.63411,
+    "maxweight": 2.08763,
+    "nsilentsynapses": 2,
+    "threshold_excess_weight_dependent": 0.00936311,
+    "one_factor_plasticity": -0.000276618,
+    "b": 0.0449122,
+    "hinge_position": 140.163,
+    "wta_per_class": 13,
+    "reward_weight": 0.906114,
+    "colanet_chartime": 5,
+    "dopamine_plasticity_time": 15,
+    "maxTSSISI": 10,
+    "reset_phase": 0,
+    "one_factor_plasticity_period": 10
+  },
+  "files": {
+    "nnc": "C:\\SNN\\KL\\CIFAR-ANN-to-SNN\\artifacts\\920.nnc",
+    "convolution_file": "C:\\SNN\\KL\\CIFAR-ANN-to-SNN\\artifacts\\conv1_uint8.txt",
+    "architecture": "C:\\SNN\\KL\\CIFAR-ANN-to-SNN\\artifacts\\architecture.json",
+    "weights": "C:\\SNN\\KL\\CIFAR-ANN-to-SNN\\artifacts\\weights_dump.txt"
+  },
+  "note": "Mode 1 does not tune layer scales on the dataset. fromFile s uses ncalibrationimages unless params.s is set. CoLaNET trains during learning_time tacts, then ObjectClassifier reports test accuracy.",
+  "joint": {
+    "s": 6.72904,
+    "lambdas": {
+      "conv1": 5.311496830940397,
+      "conv2": 5.084997550964395,
+      "pool1": 2.3501346707344286,
+      "conv3": 2.384295037031176,
+      "conv4": 1.9061371200085608,
+      "pool2": 1.1496903011798933,
+      "conv5": 6.071659679412854,
+      "gap": 4.436849965625356,
+      "_s": 6.72904,
+      "_conv1": 5.311496830940397
+    },
+    "surrogate_probe_acc": 0.482421875,
+    "surrogate_mse": 0.5533926945495721,
+    "n_surrogate_trials": 40,
+    "n_arnigpu_trials": 16,
+    "best_holdout_trial": {
+      "trial": 0,
+      "accuracy_pct": 10.39,
+      "returncode": 0,
+      "seconds": 68.49780130386353,
+      "vector": {
+        "s": 6.72904,
+        "snn_model": "linearized",
+        "stochastic_stimulation": 0.115462,
+        "hebbian_plasticity": -0.412192,
+        "stability_resource_change_ratio": 0.00656263,
+        "minweight": -1.63411,
+        "maxweight": 2.08763,
+        "nsilentsynapses": 2,
+        "threshold_excess_weight_dependent": 0.00936311,
+        "one_factor_plasticity": -0.000276618,
+        "b": 0.0449122,
+        "hinge_position": 140.163,
+        "wta_per_class": 13,
+        "reward_weight": 0.906114,
+        "layer_scales": {
+          "conv2": {
+            "weight_scale": 0.8466883169262213,
+            "bias_scale": 0.19665692853880432
+          },
+          "conv3": {
+            "weight_scale": 1.3645578703619359,
+            "bias_scale": 0.4194111821182826
+          },
+          "conv4": {
+            "weight_scale": 0.8003262493842107,
+            "bias_scale": 0.5246212297652064
+          },
+          "conv5": {
+            "weight_scale": 0.2008666900328339,
+            "bias_scale": 0.1646996130877847
+          }
+        },
+        "n_dim": 22,
+        "layer_names": [
+          "conv2",
+          "conv3",
+          "conv4",
+          "conv5"
+        ]
+      }
+    },
+    "vector_dim": 22,
+    "seed": 42,
+    "note": "23-D linearized joint: s, per-conv weight/bias scales, CoLaNET (incl. b, hinge_position, WTA), reward weight, smooth/linearized bit. Inner ArNIGPU on train hold-out; CIFAR test is the final report only."
+  }
+}

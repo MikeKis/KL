@@ -1,4 +1,8 @@
-"""Tiny CIFAR-10 CNN sized for ANN→SNN conversion (~29k folded params)."""
+"""Tiny CIFAR-10 CNN sized for ANN→SNN conversion (~29k folded params).
+
+Geometry follows KL/CIFAR-ANN-to-SNN/.specs/2026-09-10_ann-to-arni-snn.md:
+valid conv (padding=0), no pool3; GAP over 3×3 then flatten to 40-D.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +16,9 @@ class TinyCifarNet(nn.Module):
     """
     Compact VGG-style stack: ReLU + AvgPool, BatchNorm (folded at export).
 
-    Layout (spatial size after each stage):
-      32x32 → [C16, C16, P] → 16x16 → [C32, C32, P] → 8x8 → [C40, P] → 4x4
-      → AdaptiveAvgPool → Linear(40, 10)
+    Layout (spatial size after each stage, valid conv):
+      32x32 → [C16, C16, P] → 14x14 → [C32, C32, P] → 5x5 → [C40] → 3x3
+      → AdaptiveAvgPool 1×1 → Linear(40, 10)
 
     Folded parameter budget (weights+bias after absorbing BN into Conv):
       ≈ 28 626 < 30 000.
@@ -26,26 +30,25 @@ class TinyCifarNet(nn.Module):
         super().__init__()
         self.features = nn.Sequential(
             # Block 1
-            nn.Conv2d(3, 16, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(3, 16, kernel_size=3, padding=0, bias=False),
             nn.BatchNorm2d(16),
             nn.ReLU(inplace=True),
-            nn.Conv2d(16, 16, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(16, 16, kernel_size=3, padding=0, bias=False),
             nn.BatchNorm2d(16),
             nn.ReLU(inplace=True),
             nn.AvgPool2d(kernel_size=2),
             # Block 2
-            nn.Conv2d(16, 32, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(16, 32, kernel_size=3, padding=0, bias=False),
             nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
-            nn.Conv2d(32, 32, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(32, 32, kernel_size=3, padding=0, bias=False),
             nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
             nn.AvgPool2d(kernel_size=2),
             # Block 3
-            nn.Conv2d(32, 40, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(32, 40, kernel_size=3, padding=0, bias=False),
             nn.BatchNorm2d(40),
             nn.ReLU(inplace=True),
-            nn.AvgPool2d(kernel_size=2),
             nn.AdaptiveAvgPool2d(1),
         )
         self.classifier = nn.Linear(40, self.NUM_CLASSES)
@@ -88,21 +91,21 @@ def architecture_spec() -> dict[str, Any]:
             "Pooling is average (AvgPool2d) — friendlier for rate-based conversion than MaxPool.",
             "BatchNorm is used only during training; export folds it into preceding Conv (bias=True).",
             "Classifier logits are returned; apply ArgMax for class id (no Softmax required for inference).",
+            "Valid convolution (padding=0); no pool3 — last map is 3×3, then GAP so tiles fully cover.",
         ],
         "layers": [
             {"name": "conv1", "type": "Conv2d", "in_channels": 3, "out_channels": 16,
-             "kernel_size": 3, "stride": 1, "padding": 1, "bias": True, "activation": "ReLU"},
+             "kernel_size": 3, "stride": 1, "padding": 0, "bias": True, "activation": "ReLU"},
             {"name": "conv2", "type": "Conv2d", "in_channels": 16, "out_channels": 16,
-             "kernel_size": 3, "stride": 1, "padding": 1, "bias": True, "activation": "ReLU"},
+             "kernel_size": 3, "stride": 1, "padding": 0, "bias": True, "activation": "ReLU"},
             {"name": "pool1", "type": "AvgPool2d", "kernel_size": 2, "stride": 2},
             {"name": "conv3", "type": "Conv2d", "in_channels": 16, "out_channels": 32,
-             "kernel_size": 3, "stride": 1, "padding": 1, "bias": True, "activation": "ReLU"},
+             "kernel_size": 3, "stride": 1, "padding": 0, "bias": True, "activation": "ReLU"},
             {"name": "conv4", "type": "Conv2d", "in_channels": 32, "out_channels": 32,
-             "kernel_size": 3, "stride": 1, "padding": 1, "bias": True, "activation": "ReLU"},
+             "kernel_size": 3, "stride": 1, "padding": 0, "bias": True, "activation": "ReLU"},
             {"name": "pool2", "type": "AvgPool2d", "kernel_size": 2, "stride": 2},
             {"name": "conv5", "type": "Conv2d", "in_channels": 32, "out_channels": 40,
-             "kernel_size": 3, "stride": 1, "padding": 1, "bias": True, "activation": "ReLU"},
-            {"name": "pool3", "type": "AvgPool2d", "kernel_size": 2, "stride": 2},
+             "kernel_size": 3, "stride": 1, "padding": 0, "bias": True, "activation": "ReLU"},
             {"name": "gap", "type": "AdaptiveAvgPool2d", "output_size": [1, 1]},
             {"name": "flatten", "type": "Flatten"},
             {"name": "fc", "type": "Linear", "in_features": 40, "out_features": 10, "bias": True},

@@ -3,16 +3,18 @@
 PyTorch CNN with **28 626** folded weights/biases (limit ≈ 30 000), ReLU + AvgPool.
 BatchNorm is used in training and folded into Conv at export.
 
-**Test accuracy: 84.14%** (CIFAR-10, 80 epochs, seed 42).
+**Test accuracy: 83.94%** (CIFAR-10, valid conv, no `pool3`, 80 epochs, seed 42). Previous padded recipe was 83.88%.
 
 ## Layout
 
 | Stage | Ops | Spatial |
 |------|-----|---------|
-| Block 1 | Conv 3→16, ReLU, Conv 16→16, ReLU, AvgPool2 | 32→16 |
-| Block 2 | Conv 16→32, ReLU, Conv 32→32, ReLU, AvgPool2 | 16→8 |
-| Block 3 | Conv 32→40, ReLU, AvgPool2, AdaptiveAvgPool | 8→1 |
+| Block 1 | Conv 3→16, ReLU, Conv 16→16, ReLU, AvgPool2 | 32→30→28→14 |
+| Block 2 | Conv 16→32, ReLU, Conv 32→32, ReLU, AvgPool2 | 14→12→10→5 |
+| Block 3 | Conv 32→40, ReLU, AdaptiveAvgPool | 5→3→1 |
 | Head | Linear 40→10 | logits |
+
+All convolutions are **valid** (`padding=0`). There is no `pool3` (2×2 on 3×3 would not tile). GAP over 3×3 keeps a 40-D vector for CoLaNET.
 
 ## Setup
 

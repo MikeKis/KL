@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf - 8"?>
+<SNN model="linearized">
+  <RECEPTORS name="R">
+    <Implementation lib="fromFile">
+      <args type="text_values">
+        <source>CIFAR10_pre_fc_activations.csv</source>
+	        <Special>
+		        <saturation_level absolute="yes">0.8</saturation_level>
+	        </Special>
+      </args>
+    </Implementation>
+  </RECEPTORS>
+  <RECEPTORS name="Target" n="10">
+    <Implementation lib="ObjectClassifier">
+      <args>
+        <target_file>CIFAR10.target.txt</target_file>
+        <learning_time>750000</learning_time>
+      </args>
+    </Implementation>
+  </RECEPTORS>
+<!-- It is for classification of separate objects! -->
+<NETWORK ncopies="15" merge="yes">
+    <Sections>
+	    <Section name="L">
+	      <props>
+			    <n>130</n>
+    	    <Structure type="L">                          <!-- NEEDED FOR WTA -->
+              <dim>13</dim>
+              <dim>10</dim>
+          </Structure>
+	        <chartime>5</chartime>
+			    <stochastic_stimulation>0.115462</stochastic_stimulation>
+			    <hebbian_plasticity>-0.412192</hebbian_plasticity>
+			    <dopamine_plasticity_time>15</dopamine_plasticity_time>
+			    <maxTSSISI>10</maxTSSISI>
+			    <stability_resource_change_ratio>0.00656263</stability_resource_change_ratio>
+			    <minweight>-1.63411</minweight>
+			    <maxweight>2.08763</maxweight>
+			    <nsilentsynapses>2</nsilentsynapses>
+  			    <threshold_excess_weight_dependent>0.00936311</threshold_excess_weight_dependent>
+			    <reset_period>15</reset_period>
+			    <reset_phase>0</reset_phase>
+<!--ONE_FACTOR_PLASTICITY-->
+			    <_1_factor_plasticity>-0.000276618</_1_factor_plasticity>
+			    <_1_factor_plasticity_period>10</_1_factor_plasticity_period>
+<!--/ONE_FACTOR_PLASTICITY-->
+<!--LINEARIZED_PLASTICITY-->
+			    <b>0.0449122</b>
+			    <hinge_position>140.163</hinge_position>
+<!--/LINEARIZED_PLASTICITY-->
+	      </props>
+	    </Section>
+	    <Section name="OUT">
+	      <props>
+			    <n>10</n>
+	      </props>
+	    </Section>
+	    <Section name="BIASGATE">
+	      <props>
+			    <n>10</n>
+	      </props>
+	    </Section>
+	    <Link from="R" to="L" type="signal">
+	      <iniresource>0</iniresource>
+	      <delay>1</delay>
+              <probability>1</probability>
+	    </Link>
+	    <Link from="L" to="L" policy="all-to-all-sections" type="gating">
+	      <weight>-10</weight>
+	    </Link>
+	    <Link from="Target" to="L" policy="aligned" type="reward">
+	      <weight>0.906114</weight>
+	      <delay>3</delay>
+	    </Link>
+	    <Link from="L" to="OUT" policy="aligned"></Link>
+	    <Link from="OUT" to="BIASGATE" policy="aligned" type="gating">
+	      <weight>-10</weight>
+	    </Link>
+	    <Link from="BIASGATE" to="OUT" policy="aligned" type="gating">
+	      <weight>-3</weight>
+	    </Link>
+	    <Link from="Target" to="BIASGATE" policy="aligned"></Link>
+	    <Link from="BIASGATE" to="L" policy="aligned"></Link>
+    </Sections>
+</NETWORK>
+  <Readout lib="ObjectClassifier">
+    <output>OUT</output>
+  </Readout>
+</SNN>
