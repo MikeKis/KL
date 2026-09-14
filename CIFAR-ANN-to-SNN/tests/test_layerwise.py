@@ -289,6 +289,7 @@ def test_step2_classify_logs_each_arnigpu(tmp_path: Path, monkeypatch: pytest.Mo
         n_par=1,
         sat_bounds=(0.25, 4.0),
         exp_dir=tmp_path / "exp",
+        workplace_dir=tmp_path / "wp",
         search_id="913",
         arnigpu=tmp_path / "ArNIGPU.exe",
         timeout=None,
@@ -573,10 +574,10 @@ def test_cli_layerwise_copy_anchor(tmp_path: Path):
             "head.bias": np.zeros(4),
         },
     )
-    anchor = tmp_path / "1.nnc"
-    anchor.write_text(MINI_ANCHOR, encoding="utf-8")
-    out = tmp_path / "artifacts"
     exp = tmp_path / "exp"
+    exp.mkdir()
+    (exp / "1.nnc").write_text(MINI_ANCHOR, encoding="utf-8")
+    out = tmp_path / "artifacts"
     rc = main(
         [
             "--mode",
@@ -584,14 +585,16 @@ def test_cli_layerwise_copy_anchor(tmp_path: Path):
             "--no-eval",
             "--ann-dir",
             str(tmp_path),
-            "--colanet-anchor",
-            str(anchor),
+            "--anchor",
+            "1",
             "--layerwise-max-stages",
             "0",
             "--out",
             str(out),
             "--experiment-dir",
             str(exp),
+            "--workplace",
+            str(tmp_path / "wp"),
             "--experiment-id",
             "912",
         ]

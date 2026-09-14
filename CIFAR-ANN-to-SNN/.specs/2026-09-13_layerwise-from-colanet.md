@@ -2,7 +2,7 @@
 
 - **Дата**: 2026-09-13
 - **Статус**: Approved
-- **Связанные issue/PR**: `.specs/2026-09-10_ann-to-arni-snn.md` (режим `layerwise`); якорь `ArNI/Experiments/1.nnc`
+- **Связанные issue/PR**: `.specs/2026-09-10_ann-to-arni-snn.md` (режим `layerwise`); якорь `--anchor <n>` → `<cwd>/Experiments/<n>.nnc`
 
 ## Цели
 
@@ -22,7 +22,7 @@
 
 ## Функциональные требования
 
-1. Якорь: `C:/SNN/ArNI/Experiments/1.nnc` (или `--colanet-anchor`). Конвертер **парсит** XML (модель, `saturation_level`, CoLaNET, `iniresource`), а не копирует константы из старых артефактов. Смена файла якоря не требует правки кода.
+1. Якорь: `--anchor <n>` (обязательный номер без пути) → `<cwd>/Experiments/<n>.nnc`. Конвертер **парсит** XML (модель, `saturation_level`, CoLaNET, `iniresource`), а не копирует константы из старых артефактов. Смена файла якоря не требует правки кода.
 2. Порядок спайковых слоёв (голова → вход): `gap` → `conv5` → `pool2` → `conv4` → `conv3` → `pool1` → `conv2`. Первый Conv2d в список не входит.
 3. Параметры шага 1/2:
    - pooling / GAP: 1 величина — `saturation_level` входа. В XML TinyfromANN для этих слоёв **нет** `<layer>` / `weight_scale` / `bias_scale` (синапсы фиксированы как `THRESHOLD_BASE+1`).
@@ -35,8 +35,8 @@
 8. `TinyfromANN`: XML `<skip_first_conv>` (по умолчанию 1 — прежнее поведение: первый Conv2d уже сделан `fromFile` image). Для наращивания с feature-map CSV — `skip_first_conv=0`, первый слой среза может быть Conv/Pool/GAP; размер `fromFile` = `input.shape` архитектуры-среза.
 9. Период предъявления: `15 + delay`, delay = число секций TinyfromANN после текущего `fromFile` (каждый Conv/Pool/GAP, который DLL реально создаёт). Обновлять `record_presentation_period` / `ntact_per_image` / `object_presentation_period` / `reset_period` / `learning_time`. `ncopies` якоря не менять.
 10. Шаг 1: грубая сетка по порядку величины, затем Нелдер–Мид. Фитнес = `meanjaccard`. Счётчики спайков — Python-реплика rate-code + SumPool / LIF (не `discretize` как целевой прогон; `discretize` — только совместимость с C++ тестом).
-11. Шаг 2: то же пространство, фитнес = код `ObjectClassifier` / 10000 (accuracy). Старт — параметры шага 1. Вызов `ArNIGPU` (cwd = каталог эксперимента, один процесс). По умолчанию `--layerwise-train 50000` (весь CIFAR train) и `--layerwise-val 10000` (остаток файла для accuracy: CIFAR test, как в `1.nnc`). Дым: `--layerwise-train 800 --layerwise-val 200` (оба из train). Шаг 1 Jaccard по-прежнему `--layerwise-jaccard` (800).
-12. CLI: `build_snn.py --mode layerwise --colanet-anchor <1.nnc>`. Без якоря — ошибка. `--no-eval` — шаги 1 и сборка `.nnc`, без `ArNIGPU`. `--layerwise-max-stages 0` — только скопировать/переименовать якорь. `--layerwise-fresh` — игнорировать чекпоинты.
+11. Шаг 2: то же пространство, фитнес = код `ObjectClassifier` / 10000 (accuracy). Старт — параметры шага 1. Вызов `ArNIGPU` (исполняемый файл и cwd = `<cwd>/Workplace`, каталог `.nnc` = `<cwd>/Experiments`, один процесс). По умолчанию `--layerwise-train 50000` (весь CIFAR train) и `--layerwise-val 10000` (остаток файла для accuracy: CIFAR test, как в `1.nnc`). Дым: `--layerwise-train 800 --layerwise-val 200` (оба из train). Шаг 1 Jaccard по-прежнему `--layerwise-jaccard` (800).
+12. CLI: из каталога `X` (в примере CIFAR-10 — каталог `build_snn.py`) запуск `python build_snn.py --mode layerwise --anchor <n>` (`--ann-dir` указывает на ANN где угодно). `--anchor` обязателен, без дефолта, только номер (`1` → `X/Experiments/1.nnc`). Без якоря — ошибка. `--no-eval` — шаги 1 и сборка `.nnc`, без `ArNIGPU`. `--layerwise-max-stages 0` — только скопировать/переименовать якорь. `--layerwise-fresh` — игнорировать чекпоинты.
 13. Лог: JSON на стадию (параметры, Jaccard, accuracy, bounds, число оценок). Шаг 2 дополнительно пишет JSONL каждого запуска `ArNIGPU` в `step2_<layer>.jsonl` (flush после оценки) и текущий лучший набор в `step2_<layer>_best.json`. Повтор слоя продолжает с лучшей точки лога и не повторяет уже посчитанные параметры.
 14. Продолжение: повтор того же `--out` подхватывает `layerwise_log.json` и `stage_<layer>.nnc`. Завершённые слои не оптимизируются заново; цикл идёт со следующего. Незавершённый слой: шаг 1 не повторяется, шаг 2 продолжается по `step2_<layer>.jsonl`.
 15. Карты слоёв `conv2`…`gap` заранее считаются PyTorch (`CIFAR-ANN-SNN/extract_pre_fc_activations.py` → `artifacts/activations/<layer>.npy`). Конвертер их читает; без файлов — ошибка. `conv1` не выгружается (считает `fromFile` / uint8-fold на выбранных кадрах). Юнит-тесты с `frames_hwc` по-прежнему считают карты на месте.
@@ -46,7 +46,7 @@
 - Производительность: шаг 1 Jaccard — `--layerwise-jaccard` (800). Карты слоёв не считаются в конвертере (`.npy` из `artifacts/activations/`). Шаг 2 по умолчанию 50k×15 плюс 10k test; один `ArNIGPU`. Без явного `--timeout` шаг 2 ждёт `ArNIGPU` без ограничения.
 - Память: CSV широких карт (conv1/conv2) на 50k+10k — гигабайты; для дыма `--layerwise-train 800 --layerwise-val 200`.
 - Потокобезопасность: CLI однопоточный.
-- Совместимость: существующие `.nnc` без `<skip_first_conv>` — поведение DLL как раньше (пропуск первого Conv2d). Python 3.10+, numpy; scipy не обязателен.
+- Совместимость: существующие `.nnc` без `<skip_first_conv>` — поведение DLL как раньше (пропуск первого Conv2d). Python 3.10+, numpy; scipy не обязателен. Скрипты остаются в `CIFAR-ANN-to-SNN/`. `build_snn.py` запускается из каталога `X` (в примере CIFAR-10 — тот же каталог): `X/Experiments` — все рабочие `.nnc` (включая якорь только с CoLaNET) и динамические библиотеки ArNI; `X/Workplace` — растр, метки, `ArNIGPU`, создаваемые файлы данных (cwd симулятора). ANN задаётся `--ann-dir` и может лежать где угодно. Плагины копируются с нативным расширением (`.dll` / `.so`).
 - Наблюдаемость: `artifacts/layerwise_log.json` (чекпоинт после каждой стадии), `stage_<layer>.nnc`, `conversion_params.json`, `accuracy_report.json`, `step2_<layer>.jsonl` / `step2_<layer>_best.json`.
 - Прочее: seed Нелдера–Мида / грубой сетки фиксируемый.
 
@@ -81,7 +81,7 @@
 
 - Новые: нет (Нелдер–Мид свой).
 - Обновления существующих: numpy / torch уже есть для `ann_forward`.
-- Системные: MSVC для пересборки `TinyfromANN.dll` (Release|x64 → `ArNI/Experiments`).
+- Системные: Windows — MSVC, `TinyfromANN.dll` в `X/Experiments`. Linux — те же плагины как `.so` и `ArNIGPU` в `X/Workplace`.
 
 ## Критерии приёмки
 
@@ -96,6 +96,7 @@
 - [ ] Шаг 2: `step2_<layer>.jsonl` содержит `eval` на каждый `ArNIGPU`; повтор читает лучшую точку.
 - [ ] Resume: `max_stages=1`, затем полный проход в том же `--out` не повторяет шаг 1 для GAP; есть `stage_gap.nnc`.
 - [ ] Карты слоёв: конвертер читает `activations/<layer>.npy`; без них CLI с `CIFAR10.bin` — ошибка.
+- [ ] Linux/Windows: `tests/test_runtime_paths.py` — плагины с `.dll`/`.so`; дефолты от cwd: `Experiments` (nnc/плагины) и `Workplace` (данные, ArNIGPU).
 
 ### Линтеры и качество
 

@@ -26,6 +26,7 @@ from .activations import (
 from .ann_forward import first_conv_uint8_preact, relu, uint8_to_nchw
 from .ann_graph import AnnGraph, ConverterError, LayerSpec
 from .arni_gpu import find_arnigpu, run_arnigpu
+from .runtime_paths import coerce_path, copy_arni_plugins, copy_data_files, default_workplace_dir
 from .convolution_file import write_convolution_file
 from .jaccard import meanjaccard
 from .layer_sim import conv_lif_counts, sumpool_trains, trains_to_counts
@@ -428,14 +429,7 @@ def _coarse_then_nm(
 
 
 def _copy_dlls(exp_dir: Path) -> None:
-    src = Path(r"C:\SNN\ArNI\Experiments")
-    for name in ("TinyfromANN.dll", "fromFile.dll", "ObjectClassifier.dll"):
-        s, d = src / name, exp_dir / name
-        if s.is_file() and (not d.is_file() or d.resolve() != s.resolve()):
-            try:
-                shutil.copy2(s, d)
-            except OSError:
-                pass
+    copy_arni_plugins(exp_dir)
 
 
 def _write_json(path: Path, obj) -> None:
@@ -656,12 +650,22 @@ def convert_layerwise(
     labels: np.ndarray | None = None,
     do_arnigpu: bool = False,
     exp_dir: Path | None = None,
+    workplace_dir: Path | None = None,
     arnigpu: Path | None = None,
     activations_dir: Path | None = None,
 ) -> tuple[TheoreticalArtifacts, dict]:
     cfg = cfg or LayerwiseConfig()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    if exp_dir is not None:
+        exp_dir = coerce_path(exp_dir)
+    if workplace_dir is not None:
+        workplace_dir = coerce_path(workplace_dir)
+    elif exp_dir is not None:
+        workplace_dir = default_workplace_dir()
+    if activations_dir is not None:
+        activations_dir = coerce_path(activations_dir)
+    anchor_path = coerce_path(anchor_path)
     caller_frames = frames_hwc is not None
     anchor = parse_colanet_anchor(anchor_path)
     stages = layerwise_stage_names(graph)
@@ -937,6 +941,7 @@ def convert_layerwise(
                     n_par=n_par,
                     sat_bounds=(max(sat * 0.25, 1e-4), sat * 4.0),
                     exp_dir=exp_dir,
+                    workplace_dir=workplace_dir,
                     search_id=cfg.search_id,
                     arnigpu=arnigpu,
                     timeout=cfg.trial_timeout,
@@ -1022,6 +1027,7 @@ def convert_layerwise(
             log,
             do_arnigpu=do_arnigpu,
             exp_dir=exp_dir,
+            workplace_dir=workplace_dir,
             arnigpu=arnigpu,
             partial=prev_by_layer.get("fromfile"),
         )
@@ -1101,6 +1107,7 @@ def _finalize_digital_fromfile(
     *,
     do_arnigpu,
     exp_dir,
+    workplace_dir,
     arnigpu,
     partial: dict | None = None,
 ) -> tuple[float, ConversionParams]:
@@ -1185,6 +1192,7 @@ def _finalize_digital_fromfile(
                 n_par=1,
                 sat_bounds=(max(s * 0.25, 1e-4), s * 4.0),
                 exp_dir=exp_dir,
+                workplace_dir=workplace_dir,
                 search_id=cfg.search_id,
                 arnigpu=arnigpu,
                 timeout=cfg.trial_timeout,
@@ -1271,6 +1279,7 @@ def _step2_classify(
     n_par,
     sat_bounds,
     exp_dir: Path,
+    workplace_dir: Path | None = None,
     search_id,
     arnigpu,
     timeout: float | None,
@@ -1300,6 +1309,8 @@ def _step2_classify(
         return np.asarray(x0, dtype=np.float64), None, {**meta, "skipped": "ArNIGPU not found"}
     exp_dir = Path(exp_dir)
     exp_dir.mkdir(parents=True, exist_ok=True)
+    workplace = Path(workplace_dir) if workplace_dir is not None else default_workplace_dir()
+    workplace.mkdir(parents=True, exist_ok=True)
     _copy_dlls(exp_dir)
     start = np.asarray(x0, dtype=np.float64)
     if trial_log.best_x is not None:
@@ -1319,11 +1330,9 @@ def _step2_classify(
         fn_write(vec)
         staged = exp_dir / f"{search_id}.nnc"
         shutil.copy2(stage_files[0], staged)
-        for src in stage_files[1:]:
-            if src is not None and Path(src).is_file():
-                shutil.copy2(src, exp_dir / Path(src).name)
+        copy_data_files(workplace, stage_files[1:])
         t0 = time.perf_counter()
-        result = run_arnigpu(exe, exp_dir, search_id, cwd=exp_dir, timeout=timeout)
+        result = run_arnigpu(exe, exp_dir, search_id, cwd=workplace, timeout=timeout)
         elapsed = time.perf_counter() - t0
         trial_log.record_eval(
             vec,

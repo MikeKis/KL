@@ -21,6 +21,7 @@ from .ann_forward import (
 )
 from .ann_graph import AnnGraph, ConverterError
 from .arni_gpu import find_arnigpu, run_arnigpu
+from .runtime_paths import copy_arni_plugins, copy_data_files, default_workplace_dir
 from .conversion_formulas import (
     DEFAULT_LAMBDA_PERCENTILE,
     data_norm_bias_scale,
@@ -217,13 +218,18 @@ def optimize_joint(
 def _stage_trial_nnc(
     arts: TheoreticalArtifacts,
     exp_dir: Path,
+    workplace_dir: Path,
     experiment_id: int | str,
 ) -> Path:
     exp_dir.mkdir(parents=True, exist_ok=True)
+    workplace_dir.mkdir(parents=True, exist_ok=True)
+    copy_arni_plugins(exp_dir)
     staged = exp_dir / f"{experiment_id}.nnc"
     shutil.copy2(arts.nnc_path, staged)
-    for src in (arts.convolution_file, arts.architecture_copy, arts.weights_copy):
-        shutil.copy2(src, exp_dir / src.name)
+    copy_data_files(
+        workplace_dir,
+        (arts.convolution_file, arts.architecture_copy, arts.weights_copy),
+    )
     return staged
 
 
@@ -235,6 +241,7 @@ def search_joint_arnigpu(
     images_path: Path,
     labels_path: Path,
     exp_dir: Path,
+    workplace_dir: Path | None = None,
     search_id: int | str = 919,
     n_trials: int = 16,
     n_train: int = 2000,
@@ -250,6 +257,7 @@ def search_joint_arnigpu(
     exe = find_arnigpu(arnigpu)
     if exe is None:
         raise ConverterError("ArNIGPU not found; cannot run 23-D joint search")
+    workplace = Path(workplace_dir) if workplace_dir is not None else default_workplace_dir()
     layer_names = conv_scale_layer_names(graph)
     split_dir = out_dir / "joint_search"
     sub_img = split_dir / "CIFAR10_joint_subset.bin"
@@ -277,14 +285,14 @@ def search_joint_arnigpu(
             target_file=str(sub_lab.resolve()),
             experiment_id=search_id,
         )
-        _stage_trial_nnc(arts, exp_dir, search_id)
+        _stage_trial_nnc(arts, exp_dir, workplace, search_id)
         t0 = time.time()
         print(f"joint-23 trial {trial_i}: ArNIGPU -e{search_id}  model={params.snn_model} s={params.s:.4g}")
         result = run_arnigpu(
             exe,
             exp_dir,
             search_id,
-            cwd=exp_dir,
+            cwd=workplace,
             timeout=timeout,
             log_dir=trial_out,
         )
@@ -336,6 +344,7 @@ def convert_joint(
     seed: int = 42,
     do_arnigpu_search: bool = False,
     exp_dir: Path | None = None,
+    workplace_dir: Path | None = None,
     search_id: int | str = 919,
     n_trials: int = 16,
     n_search_train: int = 2000,
@@ -358,6 +367,7 @@ def convert_joint(
             images_path=images_path,
             labels_path=labels_path,
             exp_dir=exp_dir,
+            workplace_dir=workplace_dir,
             search_id=search_id,
             n_trials=n_trials,
             n_train=n_search_train,

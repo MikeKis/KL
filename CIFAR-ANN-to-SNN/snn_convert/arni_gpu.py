@@ -9,6 +9,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .runtime_paths import coerce_path, find_arnigpu_binary
+
 
 @dataclass
 class ArniGpuResult:
@@ -77,8 +79,8 @@ def run_arnigpu(
     timeout: float | None = None,
     log_dir: Path | None = None,
 ) -> ArniGpuResult:
-    nnc_dir = Path(nnc_dir)
-    cwd_path = Path(cwd) if cwd is not None else nnc_dir
+    nnc_dir = coerce_path(nnc_dir)
+    cwd_path = coerce_path(cwd) if cwd is not None else nnc_dir
     cmd = build_arnigpu_command(arnigpu, nnc_dir, experiment_id, extra_args)
     try:
         proc = subprocess.run(
@@ -125,18 +127,4 @@ def run_arnigpu(
 
 
 def find_arnigpu(explicit: Path | str | None = None) -> Path | None:
-    if explicit:
-        p = Path(explicit)
-        return p if p.is_file() else None
-    which = shutil.which("ArNIGPU") or shutil.which("ArNIGPU.exe")
-    if which:
-        return Path(which)
-    here = Path(__file__).resolve()
-    candidates = [
-        here.parents[3] / "ArNI" / "Workplace" / "ArNIGPU.exe",
-        Path(r"C:\SNN\ArNI\Workplace\ArNIGPU.exe"),
-    ]
-    for c in candidates:
-        if c.is_file():
-            return c
-    return None
+    return find_arnigpu_binary(explicit)

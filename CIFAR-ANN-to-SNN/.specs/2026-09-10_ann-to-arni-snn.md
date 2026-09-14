@@ -5,8 +5,8 @@
 - **Связанные issue/PR**: (нет)
 - **Каталог реализации**: `CIFAR-ANN-to-SNN/` (тот же уровень, что `CIFAR-ANN-SNN/`)
 - **Референс ANN (первый пример)**: `CIFAR-ANN-SNN/` (`TinyCifarNet`). Другие ANN — те же ограничения типов/геометрии; описание как `architecture.json` + свёрнутые веса.
-- **Референс ИмНС-головы**: `CIFAR-ANN-SNN/artifacts/1.nnc` (только CoLaNET на спайках предпоследнего слоя)
-- **Данные**: `CIFAR/Workplace/CIFAR10.bin`, `CIFAR/Workplace/CIFAR10.target.txt`
+- **Референс ИмНС-головы**: `--anchor <n>` → `<cwd>/Experiments/<n>.nnc` (только CoLaNET); в примере CIFAR-10 cwd = каталог `build_snn.py`
+- **Данные**: `<cwd>/Workplace/CIFAR10.bin`, `<cwd>/Workplace/CIFAR10.target.txt`; `ArNIGPU` там же. Рабочие `.nnc` и плагины ArNI — `<cwd>/Experiments`. ANN — `--ann-dir` (где угодно).
 - **Зависимая спека ArNI (bias `fromFile`)**: `ArNI/.specs/2026-09-10_fromfile-convolution-bias.md` — **реализовано**
 - **Зависимая спека ArNI (DLL стека)**: `ArNI/.specs/2026-09-10_tinyfromann-dll.md`
 
@@ -277,21 +277,19 @@ Python в `CIFAR-ANN-to-SNN/` готовит файлы весов, масшта
 
 ## Приложение A. Раскладка каталога
 
-Пути от `KL/`:
+Python-скрипты остаются в `CIFAR-ANN-to-SNN/`. `build_snn.py` запускается из каталога `X` (в примере CIFAR-10 — тот же каталог, где лежит скрипт):
 
 ```
-CIFAR-ANN-to-SNN/
-  .specs/2026-09-10_ann-to-arni-snn.md
-  build_snn.py
-  requirements.txt
-  tests/
-  artifacts/
-CIFAR-ANN-SNN/
-CIFAR/Workplace/CIFAR10.bin
-CIFAR/Workplace/CIFAR10.target.txt
+X/
+  Experiments/          # все рабочие .nnc (в т.ч. якорь 1.nnc только с CoLaNET)
+                        # и динамические библиотеки ArNI (TinyfromANN, fromFile, ObjectClassifier)
+  Workplace/            # CIFAR10.bin, CIFAR10.target.txt, ArNIGPU
+                        # сюда же пишутся файлы данных и логи симулятора
+CIFAR-ANN-SNN/artifacts/   # ANN (--ann-dir), где угодно
+CIFAR-ANN-to-SNN/          # скрипты (build_snn.py, snn_convert/, tests/)
 ```
 
-Запуск симулятора (ориентир): рабочий каталог ArNI / `Experiments`, файл `Experiments/<id>.nnc`, команда `ArNIGPU <nnc_dir> -e<id>`.
+Запуск симулятора: cwd = `X/Workplace`, `.nnc` в `X/Experiments`, команда `ArNIGPU <Experiments> -e<id>`.
 
 ## Приложение B. Параметры конвертации слоя
 
