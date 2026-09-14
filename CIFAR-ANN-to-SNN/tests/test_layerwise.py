@@ -11,7 +11,13 @@ from snn_convert.activations import layerwise_stage_names, n_params_for_layer
 from snn_convert.ann_graph import load_ann_graph
 from snn_convert.conversion_formulas import ann_stack_delay
 from snn_convert.jaccard import discretize, meanjaccard, meanjaccard_as_code
-from snn_convert.layerwise import LayerwiseConfig, convert_layerwise
+from snn_convert.layerwise import (
+    LayerwiseConfig,
+    Step2TrialLog,
+    convert_layerwise,
+    select_layerwise_split,
+    _step2_classify,
+)
 from snn_convert.layerwise_nnc import parse_colanet_anchor, sliced_architecture_dict
 from snn_convert.layer_sim import sumpool_trains, trains_to_counts
 from snn_convert.rate_code import rate_code_counts
@@ -139,6 +145,122 @@ def test_sumpool_decrement_recovers_same_tact_except_last():
     late[0, 9, 1] = True  # two inputs on the last tact: one spike, leftover lost
     late_counts = trains_to_counts(sumpool_trains(late, 2, 2, 1, 2, 2))
     assert int(late_counts[0, 0]) == 1
+
+
+def test_select_layerwise_split_all_train_uses_cifar_test():
+    train_x = np.arange(10, dtype=np.uint8).reshape(10, 1, 1, 1)
+    train_y = np.arange(10)
+    test_x = np.arange(100, 105, dtype=np.uint8).reshape(5, 1, 1, 1)
+    test_y = np.arange(100, 105)
+    frames, labs = select_layerwise_split(
+        train_x, train_y, test_x, test_y, n_train=10, n_val=5, seed=0
+    )
+    assert frames.shape[0] == 15
+    assert set(labs[:10].tolist()) == set(range(10))
+    assert labs[10:].tolist() == [100, 101, 102, 103, 104]
+
+
+def test_select_layerwise_split_small_holdout_stays_in_train():
+    train_x = np.arange(10, dtype=np.uint8).reshape(10, 1, 1, 1)
+    train_y = np.arange(10)
+    test_x = np.arange(100, 105, dtype=np.uint8).reshape(5, 1, 1, 1)
+    test_y = np.arange(100, 105)
+    frames, labs = select_layerwise_split(
+        train_x, train_y, test_x, test_y, n_train=6, n_val=2, seed=1
+    )
+    assert frames.shape[0] == 8
+    assert all(int(v) < 10 for v in labs)
+
+
+def test_layerwise_step2_has_no_timeout_by_default():
+    assert LayerwiseConfig().trial_timeout is None
+
+
+def test_step2_trial_log_writes_evals_and_reloads(tmp_path: Path):
+    path = tmp_path / "step2_gap.jsonl"
+    log = Step2TrialLog(
+        path,
+        layer="gap",
+        n_par=1,
+        param_names=["saturation"],
+        bounds=[(0.1, 10.0)],
+        x0=[1.0],
+        search_id="913",
+    )
+    log.record_eval([1.0], accuracy_pct=10.0, returncode=1000, elapsed_s=1.25, command=["ArNIGPU"])
+    log.record_eval([2.5], accuracy_pct=41.2, returncode=4120, elapsed_s=2.0)
+    log.record_done([2.5], 41.2)
+    lines = [json.loads(s) for s in path.read_text(encoding="utf-8").splitlines() if s.strip()]
+    assert lines[0]["event"] == "start"
+    evals = [r for r in lines if r["event"] == "eval"]
+    assert len(evals) == 2
+    assert evals[1]["params"]["saturation"] == 2.5
+    assert evals[1]["accuracy_pct"] == 41.2
+    assert evals[1]["best_accuracy_pct"] == 41.2
+    assert any(r["event"] == "done" for r in lines)
+    best = json.loads((tmp_path / "step2_gap_best.json").read_text(encoding="utf-8"))
+    assert best["accuracy_pct"] == 41.2
+    resumed = Step2TrialLog(
+        path,
+        layer="gap",
+        n_par=1,
+        param_names=["saturation"],
+        bounds=[(0.1, 10.0)],
+        x0=[1.0],
+        search_id="913",
+    )
+    assert resumed.n_logged == 2
+    assert resumed.best_acc == 41.2
+    assert abs(float(resumed.best_x[0]) - 2.5) < 1e-9
+    assert resumed.cached_accuracy([2.5]) == 41.2
+
+
+def test_step2_classify_logs_each_arnigpu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from snn_convert.arni_gpu import ArniGpuResult
+
+    nnc = tmp_path / "912.nnc"
+    nnc.write_text("<SNN/>", encoding="utf-8")
+    calls: list[list[float]] = []
+
+    def fake_run(*_a, **_k):
+        return ArniGpuResult(
+            command=["ArNIGPU.exe", str(tmp_path), "-e913"],
+            returncode=1234,
+            stdout="",
+            stderr="",
+            accuracy=12.34,
+            log_path=None,
+        )
+
+    monkeypatch.setattr("snn_convert.layerwise.find_arnigpu", lambda *_a, **_k: tmp_path / "ArNIGPU.exe")
+    monkeypatch.setattr("snn_convert.layerwise.run_arnigpu", fake_run)
+    monkeypatch.setattr("snn_convert.layerwise._copy_dlls", lambda *_a, **_k: None)
+    best, acc, meta = _step2_classify(
+        fn_write=lambda vec: calls.append([float(x) for x in vec]),
+        x0=[1.0],
+        n_par=1,
+        sat_bounds=(0.25, 4.0),
+        exp_dir=tmp_path / "exp",
+        search_id="913",
+        arnigpu=tmp_path / "ArNIGPU.exe",
+        timeout=None,
+        nm_iter=1,
+        stage_files=(nnc,),
+        layer="gap",
+        log_path=tmp_path / "step2_gap.jsonl",
+    )
+    log_path = Path(meta["log"])
+    assert log_path.is_file()
+    recs = [json.loads(s) for s in log_path.read_text(encoding="utf-8").splitlines() if s.strip()]
+    gpu_evals = [r for r in recs if r.get("event") == "eval" and not r.get("cached")]
+    assert len(gpu_evals) == len(calls) >= 2
+    assert gpu_evals[0]["returncode"] == 1234
+    assert gpu_evals[0]["accuracy_pct"] == 12.34
+    assert "saturation" in gpu_evals[0]["params"]
+    assert any(r["event"] == "done" for r in recs)
+    assert acc == 12.34
+    assert Path(meta["best_json"]).is_file()
+    assert best is not None
 
 
 def test_param_counts():
@@ -269,6 +391,73 @@ def test_layerwise_gap_stage_writes_nnc(tmp_path: Path):
     assert '<layer name="gap">' not in xml
     assert 0.0 <= log["stages"][0]["step1_meanjaccard"] <= 1.0
     assert all(s["layer"] != "stem" for s in log["stages"])
+    assert (out / "stage_gap.nnc").is_file()
+    assert log["stages"][0].get("complete") is True
+
+
+def test_layerwise_resumes_after_partial_stack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import snn_convert.layerwise as lw
+
+    arch = tmp_path / "architecture.json"
+    dump = tmp_path / "weights_dump.txt"
+    arch.write_text(json.dumps(SHORT_ARCH), encoding="utf-8")
+    rng = np.random.default_rng(2)
+    write_dump(
+        dump,
+        {
+            "stem.weight": rng.normal(0, 0.05, (4, 3, 3, 3)),
+            "stem.bias": rng.normal(0, 0.01, 4),
+            "block.weight": rng.normal(0, 0.05, (8, 4, 3, 3)),
+            "block.bias": rng.normal(0, 0.01, 8),
+            "head.weight": rng.normal(0, 0.05, (4, 8)),
+            "head.bias": np.zeros(4),
+        },
+    )
+    g = load_ann_graph(arch, dump)
+    anchor = tmp_path / "1.nnc"
+    anchor.write_text(MINI_ANCHOR, encoding="utf-8")
+    frames = rng.integers(0, 256, size=(8, 16, 16, 3), dtype=np.uint8)
+    labels = rng.integers(0, 4, size=(8,), dtype=np.int64)
+    out = tmp_path / "out"
+    cfg1 = LayerwiseConfig(n_train=6, n_val=2, n_jaccard=8, max_stages=1, nm_iter=2, do_step2=False)
+    _, log1 = convert_layerwise(
+        g,
+        out,
+        anchor_path=anchor,
+        frames_hwc=frames,
+        labels=labels,
+        experiment_id="912",
+        cfg=cfg1,
+        do_arnigpu=False,
+    )
+    j_gap = log1["stages"][0]["step1_meanjaccard"]
+    nnc_gap = (out / "stage_gap.nnc").read_text(encoding="utf-8")
+    calls: list[int] = []
+    orig = lw._coarse_then_nm
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return orig(*args, **kwargs)
+
+    monkeypatch.setattr(lw, "_coarse_then_nm", spy)
+    cfg2 = LayerwiseConfig(n_train=6, n_val=2, n_jaccard=8, max_stages=None, nm_iter=2, do_step2=False)
+    _, log2 = convert_layerwise(
+        g,
+        out,
+        anchor_path=anchor,
+        frames_hwc=frames,
+        labels=labels,
+        experiment_id="912",
+        cfg=cfg2,
+        do_arnigpu=False,
+    )
+    assert log2.get("resumed_from") == ["gap"]
+    assert [s["layer"] for s in log2["stages"]] == ["gap", "block", "fromfile"]
+    assert log2["stages"][0]["step1_meanjaccard"] == j_gap
+    assert len(calls) == 2
+    assert (out / "stage_gap.nnc").read_text(encoding="utf-8") == nnc_gap
+    assert (out / "stage_block.nnc").is_file()
+    assert (out / "stage_fromfile.nnc").is_file()
 
 
 def test_layerwise_final_uses_digital_fromfile_not_spiking_conv1(tmp_path: Path):

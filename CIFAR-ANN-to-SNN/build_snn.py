@@ -46,17 +46,18 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--s", type=float, default=None, help="explicit fromFile clip; mutually exclusive with ncalibrationimages")
     p.add_argument("--weight-scale", type=float, default=None)
     p.add_argument("--bias-scale", type=float, default=None)
-    p.add_argument("--timeout", type=float, default=None, help="ArNIGPU timeout in seconds")
+    p.add_argument("--timeout", type=float, default=None, help="ArNIGPU timeout in seconds; omit for no timeout")
     p.add_argument("--joint-trials", type=int, default=16, help="23-D joint: number of subset ArNIGPU evals")
     p.add_argument("--search-id", default="919", help="experiment id overwritten during joint search")
     p.add_argument("--joint-train", type=int, default=2000)
     p.add_argument("--joint-val", type=int, default=1000)
-    p.add_argument("--layerwise-train", type=int, default=800, help="train images for layerwise step 2 (from CIFAR train, not test)")
-    p.add_argument("--layerwise-val", type=int, default=200)
+    p.add_argument("--layerwise-train", type=int, default=50000, help="train images for layerwise step 2 (CIFAR train; default all 50000)")
+    p.add_argument("--layerwise-val", type=int, default=10000, help="ObjectClassifier leftover after learning; default CIFAR test when train is 50000")
     p.add_argument("--layerwise-jaccard", type=int, default=800, help="images for step-1 meanjaccard")
     p.add_argument("--layerwise-max-stages", type=int, default=None, help="0=copy anchor only; default=all layers")
     p.add_argument("--layerwise-nm-iter", type=int, default=25)
     p.add_argument("--layerwise-search-id", default="913", help="experiment id for inner ArNIGPU evals")
+    p.add_argument("--layerwise-fresh", action="store_true", help="rebuild all layers; ignore stage_*.nnc checkpoints")
     return p.parse_args(argv)
 
 
@@ -216,8 +217,9 @@ def _main_impl(args: argparse.Namespace) -> int:
             max_stages=args.layerwise_max_stages,
             nm_iter=args.layerwise_nm_iter,
             do_step2=bool(args.do_eval),
-            trial_timeout=float(args.timeout) if args.timeout is not None else 600.0,
+            trial_timeout=args.timeout,
             search_id=args.layerwise_search_id,
+            fresh=bool(args.layerwise_fresh),
         )
         image_source = str(args.images.resolve()) if args.images.is_file() else args.images.name
         target_file = str(args.labels.resolve()) if args.labels.is_file() else args.labels.name
