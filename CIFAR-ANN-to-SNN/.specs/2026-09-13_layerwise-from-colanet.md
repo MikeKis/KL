@@ -39,10 +39,11 @@
 12. CLI: `build_snn.py --mode layerwise --colanet-anchor <1.nnc>`. Без якоря — ошибка. `--no-eval` — шаги 1 и сборка `.nnc`, без `ArNIGPU`. `--layerwise-max-stages 0` — только скопировать/переименовать якорь. `--layerwise-fresh` — игнорировать чекпоинты.
 13. Лог: JSON на стадию (параметры, Jaccard, accuracy, bounds, число оценок). Шаг 2 дополнительно пишет JSONL каждого запуска `ArNIGPU` в `step2_<layer>.jsonl` (flush после оценки) и текущий лучший набор в `step2_<layer>_best.json`. Повтор слоя продолжает с лучшей точки лога и не повторяет уже посчитанные параметры.
 14. Продолжение: повтор того же `--out` подхватывает `layerwise_log.json` и `stage_<layer>.nnc`. Завершённые слои не оптимизируются заново; цикл идёт со следующего. Незавершённый слой: шаг 1 не повторяется, шаг 2 продолжается по `step2_<layer>.jsonl`.
+15. Карты слоёв `conv2`…`gap` заранее считаются PyTorch (`CIFAR-ANN-SNN/extract_pre_fc_activations.py` → `artifacts/activations/<layer>.npy`). Конвертер их читает; без файлов — ошибка. `conv1` не выгружается (считает `fromFile` / uint8-fold на выбранных кадрах). Юнит-тесты с `frames_hwc` по-прежнему считают карты на месте.
 
 ## Нефункциональные требования
 
-- Производительность: шаг 1 Jaccard — `--layerwise-jaccard` (800). Шаг 2 по умолчанию 50k×15 плюс 10k test; один `ArNIGPU`, порядка десятков минут на оценку. Без явного `--timeout` шаг 2 ждёт `ArNIGPU` без ограничения.
+- Производительность: шаг 1 Jaccard — `--layerwise-jaccard` (800). Карты слоёв не считаются в конвертере (`.npy` из `artifacts/activations/`). Шаг 2 по умолчанию 50k×15 плюс 10k test; один `ArNIGPU`. Без явного `--timeout` шаг 2 ждёт `ArNIGPU` без ограничения.
 - Память: CSV широких карт (conv1/conv2) на 50k+10k — гигабайты; для дыма `--layerwise-train 800 --layerwise-val 200`.
 - Потокобезопасность: CLI однопоточный.
 - Совместимость: существующие `.nnc` без `<skip_first_conv>` — поведение DLL как раньше (пропуск первого Conv2d). Python 3.10+, numpy; scipy не обязателен.
@@ -94,6 +95,7 @@
 - [ ] `.nnc` стадии GAP: `text_values`, `skip_first_conv>0` отсутствует или 0, `model="smooth"`, `n` L = 70, Link GAP→L, `iniresource` с якоря.
 - [ ] Шаг 2: `step2_<layer>.jsonl` содержит `eval` на каждый `ArNIGPU`; повтор читает лучшую точку.
 - [ ] Resume: `max_stages=1`, затем полный проход в том же `--out` не повторяет шаг 1 для GAP; есть `stage_gap.nnc`.
+- [ ] Карты слоёв: конвертер читает `activations/<layer>.npy`; без них CLI с `CIFAR10.bin` — ошибка.
 
 ### Линтеры и качество
 

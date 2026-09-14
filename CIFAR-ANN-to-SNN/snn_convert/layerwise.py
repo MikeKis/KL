@@ -15,9 +15,13 @@ from types import SimpleNamespace
 import numpy as np
 
 from .activations import (
+    LayerActivationStore,
+    activation_store_ready,
+    default_activations_dir,
     input_step_for_layer,
     layerwise_stage_names,
     n_params_for_layer,
+    required_precomputed_layers,
 )
 from .ann_forward import first_conv_uint8_preact, relu, uint8_to_nchw
 from .ann_graph import AnnGraph, ConverterError, LayerSpec
@@ -66,6 +70,44 @@ def _sat_grid(values: np.ndarray) -> list[float]:
     return out
 
 
+def select_layerwise_indices(
+    *,
+    n_train_set: int,
+    n_test_set: int,
+    n_train: int,
+    n_val: int,
+    seed: int = 42,
+) -> np.ndarray:
+    """Indices into concatenated CIFAR train||test (0..n_train_set-1, then test)."""
+    n_train = int(n_train)
+    n_val = int(n_val)
+    n_train_set = int(n_train_set)
+    n_test_set = int(n_test_set)
+    if n_train < 0 or n_val < 0:
+        raise ConverterError("layerwise-train / layerwise-val must be non-negative")
+    if n_train > n_train_set:
+        raise ConverterError(f"layerwise-train {n_train} larger than CIFAR train {n_train_set}")
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(n_train_set)
+    train_idx = perm[:n_train]
+    if n_val <= 0:
+        return train_idx.astype(np.int64, copy=False)
+    leftover = perm[n_train:]
+    if n_val <= len(leftover):
+        return np.concatenate([train_idx, leftover[:n_val]]).astype(np.int64, copy=False)
+    need = n_val - len(leftover)
+    if need > n_test_set:
+        raise ConverterError(
+            f"need {n_val} val images, only {len(leftover)} train leftover + {n_test_set} test"
+        )
+    test_idx = np.arange(n_train_set, n_train_set + need, dtype=np.int64)
+    parts = [train_idx]
+    if len(leftover):
+        parts.append(leftover)
+    parts.append(test_idx)
+    return np.concatenate(parts).astype(np.int64, copy=False)
+
+
 def select_layerwise_split(
     train_frames: np.ndarray,
     train_labels: np.ndarray | None,
@@ -81,39 +123,19 @@ def select_layerwise_split(
     If n_train + n_val fits in CIFAR train, val is a train hold-out.
     If n_train takes the whole train, val is taken from CIFAR test (same as 1.nnc).
     """
-    n_train = int(n_train)
-    n_val = int(n_val)
-    if n_train < 0 or n_val < 0:
-        raise ConverterError("layerwise-train / layerwise-val must be non-negative")
-    if n_train > len(train_frames):
-        raise ConverterError(f"layerwise-train {n_train} larger than CIFAR train {len(train_frames)}")
-    rng = np.random.default_rng(seed)
-    perm = rng.permutation(len(train_frames))
-    train_idx = perm[:n_train]
-    frames = train_frames[train_idx]
-    labels = None if train_labels is None else train_labels[train_idx]
-    if n_val <= 0:
-        return frames, labels
-    leftover = perm[n_train:]
-    if n_val <= len(leftover):
-        val_idx = leftover[:n_val]
-        extra_x = train_frames[val_idx]
-        extra_y = None if train_labels is None else train_labels[val_idx]
-    else:
-        extra_x = train_frames[leftover] if len(leftover) else train_frames[:0]
-        extra_y = None if train_labels is None else train_labels[leftover]
-        need = n_val - len(extra_x)
-        if need > len(test_frames):
-            raise ConverterError(
-                f"need {n_val} val images, only {len(leftover)} train leftover + {len(test_frames)} test"
-            )
-        extra_x = np.concatenate([extra_x, test_frames[:need]], axis=0)
-        if extra_y is not None:
-            extra_y = np.concatenate([extra_y, test_labels[:need]], axis=0)
-    frames = np.concatenate([frames, extra_x], axis=0)
-    if labels is not None:
-        labels = np.concatenate([labels, extra_y], axis=0)
-    return frames, labels
+    idx = select_layerwise_indices(
+        n_train_set=len(train_frames),
+        n_test_set=len(test_frames),
+        n_train=n_train,
+        n_val=n_val,
+        seed=seed,
+    )
+    stacked_x = np.concatenate([train_frames, test_frames], axis=0)
+    frames = stacked_x[idx]
+    if train_labels is None:
+        return frames, None
+    stacked_y = np.concatenate([train_labels, test_labels], axis=0)
+    return frames, stacked_y[idx]
 
 
 _WEIGHT_GRID = (1.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0)
@@ -635,10 +657,12 @@ def convert_layerwise(
     do_arnigpu: bool = False,
     exp_dir: Path | None = None,
     arnigpu: Path | None = None,
+    activations_dir: Path | None = None,
 ) -> tuple[TheoreticalArtifacts, dict]:
     cfg = cfg or LayerwiseConfig()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    caller_frames = frames_hwc is not None
     anchor = parse_colanet_anchor(anchor_path)
     stages = layerwise_stage_names(graph)
     if cfg.max_stages is not None:
@@ -763,12 +787,34 @@ def convert_layerwise(
                 n_val=cfg.n_val,
                 seed=cfg.seed,
             )
+            split_idx = select_layerwise_indices(
+                n_train_set=len(train_frames),
+                n_test_set=len(test_frames),
+                n_train=cfg.n_train,
+                n_val=cfg.n_val,
+                seed=cfg.seed,
+            )
+        else:
+            split_idx = np.arange(len(frames_hwc), dtype=np.int64)
 
         n_j = min(int(cfg.n_jaccard), len(frames_hwc))
         x_nchw = uint8_to_nchw(frames_hwc)
-        from .ann_forward import ann_forward_maps
+        act_dir = Path(activations_dir) if activations_dir is not None else default_activations_dir(graph)
+        need_names = required_precomputed_layers(graph)
+        if caller_frames:
+            from .ann_forward import ann_forward_maps
 
-        maps = ann_forward_maps(graph, x_nchw)
+            maps = ann_forward_maps(graph, x_nchw)
+        else:
+            if not activation_store_ready(act_dir, need_names):
+                missing = [n for n in need_names if not (act_dir / f"{n}.npy").is_file()]
+                raise ConverterError(
+                    f"precomputed activations missing in {act_dir}: {missing}. "
+                    "Run CIFAR-ANN-SNN/extract_pre_fc_activations.py "
+                    f"--activations-dir {act_dir}"
+                )
+            maps = LayerActivationStore(act_dir, split_idx, graph=graph, x_nchw_u8=x_nchw)
+            print(f"layerwise maps: {act_dir} ({len(split_idx)} images)")
         np.ascontiguousarray(frames_hwc).tofile(subset_images)
         if labels is not None:
             np.savetxt(subset_labels, labels, fmt="%d")

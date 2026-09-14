@@ -58,6 +58,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--layerwise-nm-iter", type=int, default=25)
     p.add_argument("--layerwise-search-id", default="913", help="experiment id for inner ArNIGPU evals")
     p.add_argument("--layerwise-fresh", action="store_true", help="rebuild all layers; ignore stage_*.nnc checkpoints")
+    p.add_argument(
+        "--activations-dir",
+        type=Path,
+        default=None,
+        help="precomputed NCHW maps (default: <ann-dir>/activations)",
+    )
     return p.parse_args(argv)
 
 
@@ -236,6 +242,7 @@ def _main_impl(args: argparse.Namespace) -> int:
             do_arnigpu=bool(args.do_eval),
             exp_dir=args.experiment_dir,
             arnigpu=args.arnigpu,
+            activations_dir=args.activations_dir or (args.ann_dir / "activations"),
         )
         extra = {
             "layerwise_stages": search.get("stages"),

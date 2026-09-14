@@ -41,6 +41,16 @@ Best checkpoint and exports go to `artifacts/`.
 | `artifacts/weights_dump.txt` | Same tensors as flat text |
 | `artifacts/best.pt` | PyTorch checkpoint (with BN, for resume) |
 | `artifacts/metrics.json` | Test accuracy, param counts |
+| `artifacts/pre_fc_activations.csv` | 60k × 40 flatten GAP (CoLaNET) |
+| `artifacts/activations/<layer>.npy` | NCHW float32 maps for `conv2`…`gap` (not `conv1`) |
+
+Dump layer maps (needs `best.pt` and `CIFAR10.bin`):
+
+```bash
+python extract_pre_fc_activations.py
+```
+
+Writes `artifacts/pre_fc_activations.csv` and `artifacts/activations/{conv2,pool1,conv3,conv4,pool2,conv5,gap}.npy` (CIFAR file order, 60 000 images). `conv1` is omitted: the SNN computes it in `fromFile`.
 
 Load weights:
 

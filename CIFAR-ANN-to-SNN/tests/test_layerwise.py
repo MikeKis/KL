@@ -11,10 +11,12 @@ from snn_convert.activations import layerwise_stage_names, n_params_for_layer
 from snn_convert.ann_graph import load_ann_graph
 from snn_convert.conversion_formulas import ann_stack_delay
 from snn_convert.jaccard import discretize, meanjaccard, meanjaccard_as_code
+from snn_convert.activations import LayerActivationStore, required_precomputed_layers
 from snn_convert.layerwise import (
     LayerwiseConfig,
     Step2TrialLog,
     convert_layerwise,
+    select_layerwise_indices,
     select_layerwise_split,
     _step2_classify,
 )
@@ -172,8 +174,54 @@ def test_select_layerwise_split_small_holdout_stays_in_train():
     assert all(int(v) < 10 for v in labs)
 
 
+def test_select_layerwise_indices_match_split():
+    idx = select_layerwise_indices(n_train_set=10, n_test_set=5, n_train=10, n_val=5, seed=0)
+    assert idx.shape == (15,)
+    assert set(idx[:10].tolist()) == set(range(10))
+    assert idx[10:].tolist() == [10, 11, 12, 13, 14]
+
+
 def test_layerwise_step2_has_no_timeout_by_default():
     assert LayerwiseConfig().trial_timeout is None
+
+
+def test_layer_activation_store_reads_npy_and_computes_first_conv(tmp_path: Path):
+    arch = tmp_path / "architecture.json"
+    dump = tmp_path / "weights_dump.txt"
+    arch.write_text(json.dumps(SHORT_ARCH), encoding="utf-8")
+    rng = np.random.default_rng(3)
+    write_dump(
+        dump,
+        {
+            "stem.weight": rng.normal(0, 0.05, (4, 3, 3, 3)),
+            "stem.bias": rng.normal(0, 0.01, 4),
+            "block.weight": rng.normal(0, 0.05, (8, 4, 3, 3)),
+            "block.bias": rng.normal(0, 0.01, 8),
+            "head.weight": rng.normal(0, 0.05, (4, 8)),
+            "head.bias": np.zeros(4),
+        },
+    )
+    g = load_ann_graph(arch, dump)
+    assert required_precomputed_layers(g) == ["gap", "block"]
+    act = tmp_path / "activations"
+    act.mkdir()
+    n_all = 6
+    gap = rng.random((n_all, 8, 1, 1)).astype(np.float32)
+    block = rng.random((n_all, 8, 12, 12)).astype(np.float32)
+    np.save(act / "gap.npy", gap)
+    np.save(act / "block.npy", block)
+    idx = np.array([0, 2, 5])
+    frames = rng.integers(0, 256, size=(3, 16, 16, 3), dtype=np.uint8)
+    from snn_convert.ann_forward import uint8_to_nchw
+
+    store = LayerActivationStore(act, idx, graph=g, x_nchw_u8=uint8_to_nchw(frames))
+    got_gap = store["gap"]
+    assert got_gap.shape == (3, 8, 1, 1)
+    np.testing.assert_allclose(got_gap, gap[idx].astype(np.float64))
+    stem = store["stem"]
+    assert stem.shape[0] == 3
+    assert stem.shape[1] == 4
+    assert np.all(stem >= 0.0)
 
 
 def test_step2_trial_log_writes_evals_and_reloads(tmp_path: Path):
