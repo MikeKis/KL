@@ -1,4 +1,5 @@
 # Spec: 2026-09-10_ann-to-arni-snn.md
+# Also: 2026-09-13_layerwise-from-colanet.md
 """CLI: convert a folded ANN (architecture.json + weights_dump.txt) to an ArNI-X SNN."""
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from pathlib import Path
 from snn_convert.ann_graph import ConverterError, load_ann_graph
 from snn_convert.arni_gpu import find_arnigpu, run_arnigpu
 from snn_convert.joint import convert_joint
+from snn_convert.layerwise import LayerwiseConfig, convert_layerwise
 from snn_convert.nnc_builder import ConversionParams
 from snn_convert.theoretical import TheoreticalArtifacts, convert_theoretical
 
@@ -49,6 +51,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--search-id", default="919", help="experiment id overwritten during joint search")
     p.add_argument("--joint-train", type=int, default=2000)
     p.add_argument("--joint-val", type=int, default=1000)
+    p.add_argument("--layerwise-train", type=int, default=800, help="train images for layerwise step 2 (from CIFAR train, not test)")
+    p.add_argument("--layerwise-val", type=int, default=200)
+    p.add_argument("--layerwise-jaccard", type=int, default=800, help="images for step-1 meanjaccard")
+    p.add_argument("--layerwise-max-stages", type=int, default=None, help="0=copy anchor only; default=all layers")
+    p.add_argument("--layerwise-nm-iter", type=int, default=25)
+    p.add_argument("--layerwise-search-id", default="913", help="experiment id for inner ArNIGPU evals")
     return p.parse_args(argv)
 
 
@@ -120,7 +128,15 @@ def _stage_and_eval(
     staged_nnc = exp_dir / f"{args.experiment_id}.nnc"
     shutil.copy2(arts.nnc_path, staged_nnc)
     for src in (arts.convolution_file, arts.architecture_copy, arts.weights_copy):
-        shutil.copy2(src, exp_dir / src.name)
+        if src is not None and Path(src).is_file():
+            shutil.copy2(src, exp_dir / Path(src).name)
+    if mode == "layerwise":
+        for extra in out_dir.glob("*.csv"):
+            shutil.copy2(extra, exp_dir / extra.name)
+        for name in ("CIFAR10_layerwise.bin", "CIFAR10_layerwise.target.txt"):
+            extra = out_dir / name
+            if extra.is_file():
+                shutil.copy2(extra, exp_dir / name)
     if not args.images.is_file():
         print(f"warning: images not found at {args.images}", file=sys.stderr)
     if not args.labels.is_file():
@@ -185,7 +201,46 @@ def _main_impl(args: argparse.Namespace) -> int:
     if args.mode == "layerwise":
         if args.colanet_anchor is None:
             raise ConverterError("mode layerwise requires --colanet-anchor")
-        raise ConverterError("mode layerwise is not implemented yet (queue: theoretical → joint → layerwise)")
+        arch = args.architecture or (args.ann_dir / "architecture.json")
+        weights = args.weights or (args.ann_dir / "weights_dump.txt")
+        if not arch.is_file() or not weights.is_file():
+            raise ConverterError(f"need {arch} and {weights}")
+        graph = load_ann_graph(arch, weights)
+        out_dir: Path = args.out
+        out_dir.mkdir(parents=True, exist_ok=True)
+        _preserve_previous_params(out_dir, args.mode)
+        cfg = LayerwiseConfig(
+            n_train=args.layerwise_train,
+            n_val=args.layerwise_val,
+            n_jaccard=args.layerwise_jaccard,
+            max_stages=args.layerwise_max_stages,
+            nm_iter=args.layerwise_nm_iter,
+            do_step2=bool(args.do_eval),
+            trial_timeout=float(args.timeout) if args.timeout is not None else 600.0,
+            search_id=args.layerwise_search_id,
+        )
+        image_source = str(args.images.resolve()) if args.images.is_file() else args.images.name
+        target_file = str(args.labels.resolve()) if args.labels.is_file() else args.labels.name
+        arts, search = convert_layerwise(
+            graph,
+            out_dir,
+            anchor_path=args.colanet_anchor,
+            images_path=args.images,
+            labels_path=args.labels,
+            image_source=image_source,
+            target_file=target_file,
+            experiment_id=args.experiment_id,
+            cfg=cfg,
+            do_arnigpu=bool(args.do_eval),
+            exp_dir=args.experiment_dir,
+            arnigpu=args.arnigpu,
+        )
+        extra = {
+            "layerwise_stages": search.get("stages"),
+            "anchor": str(args.colanet_anchor),
+        }
+        print(f"wrote {arts.nnc_path}")
+        return _stage_and_eval(args, arts, mode="layerwise", extra_report=extra)
 
     arch = args.architecture or (args.ann_dir / "architecture.json")
     weights = args.weights or (args.ann_dir / "weights_dump.txt")

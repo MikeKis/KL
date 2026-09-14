@@ -1,4 +1,5 @@
 # Spec: 2026-09-10_ann-to-arni-snn.md
+# Also: 2026-09-13_layerwise-from-colanet.md (iniresource, skip_first_conv)
 """Emit .nnc: fromFile (conv1) + TinyfromANN + CoLaNET + ObjectClassifier."""
 
 from __future__ import annotations
@@ -51,6 +52,8 @@ class ConversionParams:
     maxTSSISI: int = 10
     reset_phase: int = 0
     one_factor_plasticity_period: int = 10
+    iniresource: float = 0.0
+    skip_first_conv: bool | None = None  # None = omit XML (DLL default 1)
 
     @property
     def learning_time(self) -> int:
@@ -58,7 +61,8 @@ class ConversionParams:
 
     def apply_stack_presentation(self, layers) -> None:
         """Lengthen CoLaNET object period by ANN stack delay. Does not change ncopies."""
-        self.ntact_per_image = colanet_presentation_period(layers)
+        skip = True if self.skip_first_conv is None else bool(self.skip_first_conv)
+        self.ntact_per_image = colanet_presentation_period(layers, skip_first_conv=skip)
 
     @classmethod
     def from_mapping(cls, raw: dict) -> "ConversionParams":
@@ -96,6 +100,8 @@ class ConversionParams:
                 "one_factor_plasticity_period",
             }:
                 kwargs[key] = int(val)
+            elif key == "skip_first_conv":
+                kwargs[key] = None if val is None else bool(val)
             else:
                 kwargs[key] = val
         return cls(**kwargs)
@@ -145,6 +151,11 @@ def build_nnc_xml(
             f"        </layer>"
         )
     layers_block = ("\n" + "\n".join(layer_xml) + "\n") if layer_xml else "\n"
+    skip_xml = ""
+    if params.skip_first_conv is False:
+        skip_xml = "        <skip_first_conv>0</skip_first_conv>\n"
+    elif params.skip_first_conv is True:
+        skip_xml = "        <skip_first_conv>1</skip_first_conv>\n"
 
     learning_time = params.learning_time
     wta = max(1, int(params.wta_per_class))
@@ -199,7 +210,7 @@ def build_nnc_xml(
         <weights>{escape(weights_file)}</weights>
         <chartime>{params.chartime}</chartime>
         <pool_chartime>{params.pool_chartime}</pool_chartime>
-{layers_block}      </args>
+{skip_xml}{layers_block}      </args>
     </Implementation>
   </NETWORK>
   <NETWORK ncopies="{params.ncopies}" merge="yes">
@@ -238,7 +249,7 @@ def build_nnc_xml(
         </props>
       </Section>
       <Link from="{escape(output_section)}" to="L" type="signal">
-        <iniresource>0</iniresource>
+        <iniresource>{params.iniresource:.8g}</iniresource>
         <delay>1</delay>
         <probability>1</probability>
       </Link>

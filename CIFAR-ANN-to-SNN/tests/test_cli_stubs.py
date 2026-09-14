@@ -1,4 +1,5 @@
 # Spec: 2026-09-10_ann-to-arni-snn.md
+# Also: 2026-09-13_layerwise-from-colanet.md
 from __future__ import annotations
 
 from build_snn import main

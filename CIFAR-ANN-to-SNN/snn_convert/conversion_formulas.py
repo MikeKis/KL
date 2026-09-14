@@ -1,4 +1,5 @@
 # Spec: 2026-09-10_ann-to-arni-snn.md appendix B
+# Also: 2026-09-13_layerwise-from-colanet.md (skip_first_conv delay)
 """Theoretical ANN→SNN coefficient formulas (mode 1). Constants match TinyfromANN / EfficientNet."""
 
 from __future__ import annotations
@@ -80,15 +81,15 @@ def bias_to_lif_property(
     return "threshold_excess", -stim * float(chartime)
 
 
-def ann_stack_delay(layers) -> int:
-    """Tacts from fromFile (first Conv) to CoLaNET input. Each later Conv/Pool/GAP is delay 1."""
-    skipped_first_conv = False
+def ann_stack_delay(layers, *, skip_first_conv: bool = True) -> int:
+    """Tacts from fromFile to CoLaNET input. Each TinyfromANN-created Conv/Pool/GAP is delay 1."""
+    skipped_first_conv = not skip_first_conv
     n = 0
     for layer in layers:
         t = layer.type if hasattr(layer, "type") else layer["type"]
         if t in ("ReLU", "Flatten", "Linear"):
             continue
-        if t == "Conv2d" and not skipped_first_conv:
+        if t == "Conv2d" and skip_first_conv and not skipped_first_conv:
             skipped_first_conv = True
             continue
         if t in ("Conv2d", "AvgPool2d", "AdaptiveAvgPool2d"):
@@ -96,6 +97,8 @@ def ann_stack_delay(layers) -> int:
     return n
 
 
-def colanet_presentation_period(layers, base: int = COLANET_BASE_PERIOD) -> int:
+def colanet_presentation_period(
+    layers, base: int = COLANET_BASE_PERIOD, *, skip_first_conv: bool = True
+) -> int:
     """object_presentation_period / ntact_per_image; ncopies is independent."""
-    return int(base) + ann_stack_delay(layers)
+    return int(base) + ann_stack_delay(layers, skip_first_conv=skip_first_conv)
