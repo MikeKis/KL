@@ -115,7 +115,9 @@ def run_arnigpu(
         (log_dir / f"arnigpu_{experiment_id}.stdout.txt").write_text(stdout, encoding="utf-8")
         (log_dir / f"arnigpu_{experiment_id}.stderr.txt").write_text(stderr, encoding="utf-8")
         if log_path.is_file():
-            shutil.copy2(log_path, log_dir / log_path.name)
+            dest = log_dir / log_path.name
+            if dest.resolve() != log_path.resolve():
+                shutil.copy2(log_path, dest)
     return ArniGpuResult(
         command=cmd,
         returncode=returncode,

@@ -23,3 +23,21 @@ def test_termination_code_from_log():
 
     text = "Finished normally\nTermination code 996\n"
     assert parse_termination_code(text) == 996
+
+
+def test_run_arnigpu_skips_copy_when_log_already_in_log_dir(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from snn_convert.arni_gpu import run_arnigpu
+
+    general = tmp_path / "General913.log"
+    general.write_text("Termination code 1234\n", encoding="utf-8")
+
+    def fake_run(*_a, **_k):
+        return SimpleNamespace(returncode=1234, stdout="", stderr="")
+
+    monkeypatch.setattr("snn_convert.arni_gpu.subprocess.run", fake_run)
+    result = run_arnigpu("ArNIGPU", tmp_path / "Experiments", "913", cwd=tmp_path, log_dir=tmp_path)
+    assert result.accuracy == 12.34
+    assert result.log_path == general
+    assert (tmp_path / "arnigpu_913.stdout.txt").is_file()
