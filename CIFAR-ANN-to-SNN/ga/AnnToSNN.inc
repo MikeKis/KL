@@ -1,20 +1,10 @@
 // Spec: 2026-09-10_ann-to-arni-snn.md
 // GA task for TinyfromANN + CoLaNET (agreed joint axes, linearized 23-D).
 //
-// Workplace cwd: C:\SNN\ArNI\Workplace
-// Launch via cmd.exe (PowerShell swallows -e/-o):
-//   cmd /c "ArNI_GA.exe 1 1 -p24 -e0.08 -M30 -oAnnToSNN.ga.log"
-//
-// Server: comment out #define SMOKE_GA below, copy this file to C:\SNN\ArNI\ArNI_OPT.inc,
-// rebuild SuperArNI Release|x64, copy Experiments\{fromFile,TinyfromANN,ObjectClassifier}.dll
-// next to ArNIGPU.exe. One eval ≈ 26 min (50k+10k × 22 tacts). Do not use default -p300.
-//
-// Local smoke (#define SMOKE_GA): 800+200 from train, ~15 s/eval. Fitness may all be 899
-// (dummy i%10) if CoLaNET OUT is silent; ArNI_GA then stops ("all values are equal").
 
 //#define USE_CPU
 #define EMULATOR "ArNIGPU"
-#define RECOGNIZER ""
+#define NNPFILE "AnnToSNN.nnp"
 
 //------------------------------------------------------------------------------------------------
 // CoLaNET on receptors: 10 tacts image + 5 silence = 15.
@@ -24,26 +14,16 @@
 #define COLANET_BASE_PERIOD 15
 #define ANN_STACK_DELAY 7
 #define PRESENTATION_PERIOD (COLANET_BASE_PERIOD + ANN_STACK_DELAY)
-// Local smoke: TRAIN subset only. Comment SMOKE_GA on the server before rebuilding SuperArNI
 // (full 50k+10k, GAP→L iniresource=0).
-#define SMOKE_GA
-#ifdef SMOKE_GA
-#define NLEARNINGEXAMPLES 800
-#define NTESTEXAMPLES 200
-#define RASTER_INPUT "C:\\SNN\\KL\\CIFAR-ANN-to-SNN\\ga\\CIFAR10_smoke.bin"
-#define TARGET_FILE "C:\\SNN\\KL\\CIFAR-ANN-to-SNN\\ga\\CIFAR10_smoke.target.txt"
-#else
 #define NLEARNINGEXAMPLES 50000
-#define NTESTEXAMPLES 10000
-#define RASTER_INPUT "C:\\SNN\\KL\\CIFAR\\Workplace\\CIFAR10.bin"
-#define TARGET_FILE "C:\\SNN\\KL\\CIFAR\\Workplace\\CIFAR10.target.txt"
-#endif
-#define MAXEMULATIONTIME (PRESENTATION_PERIOD * (NLEARNINGEXAMPLES + NTESTEXAMPLES))
-#define TESTING_PERIOD (NTESTEXAMPLES * PRESENTATION_PERIOD)
-#define LEARNING_TIME (MAXEMULATIONTIME - TESTING_PERIOD)
-#define CONVOLUTION_FILE "C:\\SNN\\KL\\CIFAR-ANN-to-SNN\\artifacts\\conv1_uint8.txt"
-#define ARCHITECTURE "C:\\SNN\\KL\\CIFAR-ANN-to-SNN\\artifacts\\architecture.json"
-#define WEIGHTS "C:\\SNN\\KL\\CIFAR-ANN-to-SNN\\artifacts\\weights_dump.txt"
+#define RASTER_INPUT "CIFAR10.bin"
+#define TARGET_FILE "CIFAR10.target.txt"
+//#define MAXEMULATIONTIME (PRESENTATION_PERIOD * (NLEARNINGEXAMPLES + NTESTEXAMPLES))
+//#define TESTING_PERIOD (NTESTEXAMPLES * PRESENTATION_PERIOD)
+#define LEARNING_TIME (NLEARNINGEXAMPLES * PRESENTATION_PERIOD)
+#define CONVOLUTION_FILE "conv1_uint8.txt"
+#define ARCHITECTURE "architecture.json"
+#define WEIGHTS "weights_dump.txt"
 #define CONV1_BIAS "0.092365989, -0.74394044, 0.29333113, 0.24356041, 0.51389766, 0.29489307, 0.36465537, 0.064592648, 0.63212045, 0.73419736, -0.2817174, -0.2357498, 0.05582869, 0.22460852, 0.30902641, 0.56860738"
 #define XSIZE 32
 #define YSIZE 32
@@ -52,10 +32,9 @@
 #define NTARGETCLASSES 10
 #define LEARNINGGROUPSIZE 1
 #define NNETWORKCOPIES 15
-#define EXPERIMENTS_DIR "C:\\SNN\\ArNI\\Experiments"
 //------------------------------------------------------------------------------------------------
 
-NetworkTestingParams ntpG{EMULATOR, RECOGNIZER, SECOND_TEST_THRESHOLD};
+NetworkTestingParams ntpG{EMULATOR, "", SECOND_TEST_THRESHOLD};
 
 //------------------------------------------------------------------------------------------------
 // Gene order is the chromosome. Do not comment lines inside this block.
@@ -117,7 +96,7 @@ EVALUATOR
     if (!bNoFatalDefect(vr_))
         return pair<double, double>();
 
-    SETNNP(EXPERIMENTS_DIR FOLDER_SEPARATOR "AnnToSNN.nnp");
+    SETNNP(".." FOLDER_SEPARATOR "Experiments" FOLDER_SEPARATOR NNPFILE);
 
     SUBMACRO(NNETWORKCOPIES);
     SUBMACRO(XSIZE);
@@ -174,7 +153,7 @@ EVALUATOR
 
     unsigned CurrentExperiment = STARTING_EXPERIMENT_ID + indinPack;
 
-    sprintf(buf, EXPERIMENTS_DIR FOLDER_SEPARATOR "%d.nnc", CurrentExperiment);
+    sprintf(buf, ".." FOLDER_SEPARATOR "Experiments" FOLDER_SEPARATOR "%d.nnc", CurrentExperiment);
     ofstream ofs(buf);
     SAVENNC(ofs);
     ofs.close();
@@ -204,13 +183,15 @@ EVALUATOR
             mutLog.lock();
             ofsTaskLog << "Experiment " << CurrentExperiment << " - " << EMULATOR << " started at " << boost::posix_time::second_clock::local_time() << std::endl;
             mutLog.unlock();
-            sprintf(buf + 300, "-T%d", MAXEMULATIONTIME);
             vstr_argsEmulator.resize(3);
-            vstr_argsEmulator[0] = EXPERIMENTS_DIR;
+	    vstr_argsEmulator[0] = ".." FOLDER_SEPARATOR "Experiments";
             vstr_argsEmulator[1] = buf;
             vstr_argsEmulator[2] = "-R";
             vstr_argsEmulator.push_back("-f" + str(LEARNING_TIME));
-            vstr_argsEmulator.push_back(buf + 300);
+#ifdef MAXEMULATIONTIME
+	    sprintf(buf + 100, "-T%d", MAXEMULATIONTIME);
+	    vstr_argsEmulator.push_back(buf + 100);
+#endif
 #ifndef USE_CPU
             sprintf(buf + 100, "-C%d", SelectedDevice);
             vstr_argsEmulator.push_back(buf + 100);

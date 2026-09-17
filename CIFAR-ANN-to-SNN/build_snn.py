@@ -46,7 +46,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--ann-dir", type=cli_path, default=DEFAULT_ANN_DIR, help="ANN artifacts (architecture.json + weights_dump.txt); may be anywhere")
     p.add_argument("--architecture", type=cli_path, default=None)
     p.add_argument("--weights", type=cli_path, default=None)
-    p.add_argument("--mode", choices=("theoretical", "joint", "layerwise"), default="theoretical")
+    p.add_argument("--mode", choices=("theoretical", "joint", "layerwise"), default="layerwise")
     p.add_argument("--images", type=cli_path, default=None, help="raster (default: <cwd>/Workplace/CIFAR10.bin)")
     p.add_argument("--labels", type=cli_path, default=None, help="labels (default: <cwd>/Workplace/CIFAR10.target.txt)")
     p.add_argument("--out", type=cli_path, default=None, help="converter data/logs (default: <cwd>/Workplace)")
