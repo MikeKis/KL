@@ -444,6 +444,65 @@ def test_layerwise_gap_stage_writes_nnc(tmp_path: Path):
     assert log["stages"][0].get("complete") is True
 
 
+def test_layerwise_fresh_reruns_finished_step2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    arch = tmp_path / "architecture.json"
+    dump = tmp_path / "weights_dump.txt"
+    arch.write_text(json.dumps(SHORT_ARCH), encoding="utf-8")
+    rng = np.random.default_rng(0)
+    write_dump(
+        dump,
+        {
+            "stem.weight": rng.normal(0, 0.05, (4, 3, 3, 3)),
+            "stem.bias": rng.normal(0, 0.01, 4),
+            "block.weight": rng.normal(0, 0.05, (8, 4, 3, 3)),
+            "block.bias": rng.normal(0, 0.01, 8),
+            "head.weight": rng.normal(0, 0.05, (4, 8)),
+            "head.bias": np.zeros(4),
+        },
+    )
+    g = load_ann_graph(arch, dump)
+    anchor = tmp_path / "1.nnc"
+    anchor.write_text(MINI_ANCHOR, encoding="utf-8")
+    frames = rng.integers(0, 256, size=(8, 16, 16, 3), dtype=np.uint8)
+    labels = rng.integers(0, 4, size=(8,), dtype=np.int64)
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "step2_gap.jsonl").write_text(
+        json.dumps({"event": "done", "layer": "gap"}) + "\n", encoding="utf-8"
+    )
+    (out / "step2_gap_best.json").write_text(
+        json.dumps({"params": {"saturation": 9.9}, "accuracy_pct": 1.0}),
+        encoding="utf-8",
+    )
+    called: list[str] = []
+
+    def fake_step2(**kwargs):
+        called.append(str(kwargs["layer"]))
+        return np.array([1.5], dtype=np.float64), 12.0, {}
+
+    monkeypatch.setattr("snn_convert.layerwise._step2_classify", fake_step2)
+    convert_layerwise(
+        g,
+        out,
+        anchor_path=anchor,
+        frames_hwc=frames,
+        labels=labels,
+        experiment_id="912",
+        cfg=LayerwiseConfig(
+            n_train=6,
+            n_val=2,
+            n_jaccard=8,
+            max_stages=1,
+            nm_iter=2,
+            do_step2=True,
+            fresh=True,
+        ),
+        do_arnigpu=True,
+        exp_dir=tmp_path / "exp",
+    )
+    assert called == ["gap"]
+
+
 def test_layerwise_resumes_after_partial_stack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import snn_convert.layerwise as lw
 

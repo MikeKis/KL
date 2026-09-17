@@ -88,7 +88,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--layerwise-max-stages", type=int, default=None, help="0=copy anchor only; default=all layers")
     p.add_argument("--layerwise-nm-iter", type=int, default=25)
     p.add_argument("--layerwise-search-id", default="913", help="experiment id for inner ArNIGPU evals")
-    p.add_argument("--layerwise-fresh", action="store_true", help="rebuild all layers; ignore stage_*.nnc checkpoints")
+    p.add_argument("--layerwise-fresh", action="store_true", help="rebuild all layers; ignore stage_*.nnc and step2_*.jsonl checkpoints")
     p.add_argument(
         "--activations-dir",
         type=cli_path,

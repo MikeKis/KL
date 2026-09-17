@@ -55,7 +55,7 @@ class LayerwiseConfig:
     do_step2: bool = True
     trial_timeout: float | None = None  # None = no ArNIGPU timeout on step 2
     search_id: str = "913"
-    fresh: bool = False  # ignore layerwise_log / stage_*.nnc and rebuild
+    fresh: bool = False  # ignore layerwise_log / stage_*.nnc / step2_*.jsonl and rebuild
 
 
 def _sat_grid(values: np.ndarray) -> list[float]:
@@ -446,6 +446,18 @@ def _stage_snapshot_path(out_dir: Path, layer: str) -> Path:
     return Path(out_dir) / f"stage_{layer}.nnc"
 
 
+def _discard_step2_logs(out_dir: Path) -> None:
+    """Drop finished step-2 JSONL so --layerwise-fresh actually re-runs ArNIGPU."""
+    out = Path(out_dir)
+    for path in (*out.glob("step2_*.jsonl"), *out.glob("step2_*_best.json")):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+
+
 def _jsonl_has_done(path: Path) -> bool:
     if not path.is_file():
         return False
@@ -657,6 +669,8 @@ def convert_layerwise(
     cfg = cfg or LayerwiseConfig()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    if cfg.fresh:
+        _discard_step2_logs(out_dir)
     if exp_dir is not None:
         exp_dir = coerce_path(exp_dir)
     if workplace_dir is not None:
@@ -915,7 +929,9 @@ def convert_layerwise(
 
         if need_step2:
             jsonl_path = out_dir / f"step2_{layer_name}.jsonl"
-            done_vec = _best_json_vec(out_dir, layer_name, n_par) if _jsonl_has_done(jsonl_path) else None
+            done_vec = None
+            if not cfg.fresh and _jsonl_has_done(jsonl_path):
+                done_vec = _best_json_vec(out_dir, layer_name, n_par)
             if done_vec is not None:
                 step2_x, step2_acc, step2_meta = done_vec, None, {"resumed_done": True}
                 print(f"layerwise {layer_name}: reuse finished step2")
@@ -1181,7 +1197,9 @@ def _finalize_digital_fromfile(
             )
 
         jsonl_path = out_dir / "step2_fromfile.jsonl"
-        done_vec = _best_json_vec(out_dir, "fromfile", 1) if _jsonl_has_done(jsonl_path) else None
+        done_vec = None
+        if not cfg.fresh and _jsonl_has_done(jsonl_path):
+            done_vec = _best_json_vec(out_dir, "fromfile", 1)
         if done_vec is not None:
             step2_x, step2_acc, step2_meta = done_vec, None, {"resumed_done": True}
             print("layerwise fromfile: reuse finished step2")
