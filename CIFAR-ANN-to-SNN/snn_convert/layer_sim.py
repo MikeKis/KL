@@ -6,7 +6,7 @@ from __future__ import annotations
 import numpy as np
 
 from .ann_forward import conv2d_valid
-from .conversion_formulas import ARNI_SYNAPSE_SCALE, ARNI_THRESHOLD_BASE, DEFAULT_CHARTIME
+from .conversion_formulas import ARNI_SYNAPSE_SCALE, ARNI_THRESHOLD_BASE, DEFAULT_CHARTIME, DEFAULT_POOL_CHARTIME
 
 
 def trains_to_nchw(trains: np.ndarray, h: int, w: int, c: int) -> np.ndarray:
@@ -23,6 +23,15 @@ def nchw_trains_to_rows(trains_nchw: np.ndarray) -> np.ndarray:
     return trains_nchw.transpose(0, 1, 3, 4, 2).reshape(n, t, h * w * c)
 
 
+def _decay_shift(chartime: int) -> int:
+    ct = int(chartime)
+    if ct <= 0:
+        return 0
+    if ct > 1024:
+        return -1
+    return 1024 - 1024 // ct
+
+
 def sumpool_trains(
     trains: np.ndarray,
     in_h: int,
@@ -32,13 +41,18 @@ def sumpool_trains(
     stride: int,
     *,
     threshold_base: float = ARNI_THRESHOLD_BASE,
+    weight_scale: float = 1.0,
+    synapse_weight: float | None = None,
+    chartime: int = DEFAULT_POOL_CHARTIME,
 ) -> np.ndarray:
     """
-    SumPool LIF: each window input spike adds THRESHOLD+1; on fire, potential
-    is decremented by the threshold (not zeroed). One spike per tact, leftover
-    can fire on later tacts of the same presentation. Charge still above
-    threshold after the last tact is lost (end of the image).
+    SumPool LIF with NeuLIF leak (pool_chartime). Each window input spike adds
+    synapse weight; on fire, potential is decremented by the threshold (not zeroed).
+    chartime=3 (default) keeps membrane memory so output rate tracks input intensity.
+    chartime>1024 disables leak (unit-test helper).
     """
+    from .conversion_formulas import pool_synapse_millivals
+
     x = trains_to_nchw(np.asarray(trains), in_h, in_w, channels)
     n, tpres, c, _h, _w = x.shape
     k = int(kernel)
@@ -47,8 +61,12 @@ def sumpool_trains(
     out_w = (in_w - k) // s + 1
     if out_h < 1 or out_w < 1:
         raise ValueError("sumpool produced empty map")
-    w_syn = float(threshold_base) + 1.0
+    if synapse_weight is not None:
+        w_syn = float(synapse_weight)
+    else:
+        w_syn = float(pool_synapse_millivals(weight_scale))
     thr = float(threshold_base)
+    decay = _decay_shift(chartime)
     out = np.zeros((n, tpres, c, out_h, out_w), dtype=bool)
     for oy in range(out_h):
         for ox in range(out_w):
@@ -56,20 +74,15 @@ def sumpool_trains(
             incoming = patch.reshape(n, tpres, c, -1).sum(axis=3).astype(np.float64)
             potential = np.zeros((n, c), dtype=np.float64)
             for t in range(tpres):
+                if decay == 0:
+                    potential = np.zeros_like(potential)
+                elif decay > 0:
+                    potential = np.trunc(potential * decay / 1024.0)
                 potential = potential + incoming[:, t] * w_syn
                 fired = potential > thr
                 out[:, t, :, oy, ox] = fired
                 potential = potential - fired.astype(np.float64) * thr
     return nchw_trains_to_rows(out)
-
-
-def _decay_shift(chartime: int) -> int:
-    ct = int(chartime)
-    if ct <= 0:
-        return 0
-    if ct > 1024:
-        return -1
-    return 1024 - 1024 // ct
 
 
 def conv_lif_counts(

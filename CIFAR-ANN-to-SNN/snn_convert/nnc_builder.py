@@ -13,6 +13,7 @@ from .conversion_formulas import (
     ARNI_SYNAPSE_SCALE,
     DEFAULT_BIAS_SCALE,
     DEFAULT_CHARTIME,
+    DEFAULT_POOL_CHARTIME,
     DEFAULT_WEIGHT_SCALE,
     colanet_presentation_period,
 )
@@ -24,7 +25,7 @@ class ConversionParams:
     bias_scale: float = DEFAULT_BIAS_SCALE
     synapse_scale: float = ARNI_SYNAPSE_SCALE
     chartime: int = DEFAULT_CHARTIME
-    pool_chartime: int = 1
+    pool_chartime: int = DEFAULT_POOL_CHARTIME
     tpres: int = 10
     ntact_per_image: int = 15
     ncalibrationimages: int = 1000
@@ -143,13 +144,10 @@ def build_nnc_xml(
     layer_xml = []
     for name, sc in params.layer_scales.items():
         ws = sc.get("weight_scale", params.weight_scale)
-        bs = sc.get("bias_scale", params.bias_scale)
-        layer_xml.append(
-            f'        <layer name="{escape(name)}">\n'
-            f"          <weight_scale>{ws:.8g}</weight_scale>\n"
-            f"          <bias_scale>{bs:.8g}</bias_scale>\n"
-            f"        </layer>"
-        )
+        body = f"          <weight_scale>{ws:.8g}</weight_scale>\n"
+        if "bias_scale" in sc:
+            body += f"          <bias_scale>{float(sc['bias_scale']):.8g}</bias_scale>\n"
+        layer_xml.append(f'        <layer name="{escape(name)}">\n{body}        </layer>')
     layers_block = ("\n" + "\n".join(layer_xml) + "\n") if layer_xml else "\n"
     skip_xml = ""
     if params.skip_first_conv is False:

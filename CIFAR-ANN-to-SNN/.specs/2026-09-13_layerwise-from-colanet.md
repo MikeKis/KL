@@ -25,12 +25,12 @@
 1. Якорь: `--anchor <n>` (обязательный номер без пути) → `<cwd>/Experiments/<n>.nnc`. Конвертер **парсит** XML (модель, `saturation_level`, CoLaNET, `iniresource`), а не копирует константы из старых артефактов. Смена файла якоря не требует правки кода.
 2. Порядок спайковых слоёв (голова → вход): `gap` → `conv5` → `pool2` → `conv4` → `conv3` → `pool1` → `conv2`. Первый Conv2d в список не входит.
 3. Параметры шага 1/2:
-   - pooling / GAP: 1 величина — `saturation_level` входа. В XML TinyfromANN для этих слоёв **нет** `<layer>` / `weight_scale` / `bias_scale` (синапсы фиксированы как `THRESHOLD_BASE+1`).
+   - pooling / GAP: 2 величины — `saturation_level` входа и `weight_scale` синапса SumPool (`w = round(weight_scale · (THRESHOLD_BASE+1))`, по умолчанию `weight_scale=1` → прежний `THRESHOLD_BASE+1`). В XML TinyfromANN — `<layer name="…"><weight_scale>…</weight_scale></layer>`.
    - спайковая свёртка (не conv1): 3 величины — `saturation_level` входа, `weight_scale`, `bias_scale`;
    - после `conv2`: только `s` цифрового `fromFile` image (ядра и bias conv1 не масштабируются).
 4. Кодирование `text_values` без `nreceptivefields` — `GetSpikesfromTextValuesFileRateCoded`: `d = clip(r/sat, 0, 1)`, интегратор `dState`, спайк при `dState >= 1`, `record_presentation_time=10`. `dState` **не** сбрасывается между записями (как в fromFile).
 5. Порядок рецепторов / столбцов CSV: `spatial_index(y, x, c) = (y * W + x) * C + c` (NHWC flatten).
-6. AvgPool ≡ SumPool: синапс `THRESHOLD_BASE+1`. В LIF при спайке потенциал **не** сбрасывается в 0, а **декрементируется на величину порога**, поэтому число выходных спайков почти равно сумме входных по окну. Расхождение — остаток заряда, не успевший дать спайк в самом конце презентации картинки. Шаг 1 Jaccard моделирует этот интегратор (не OR по такту).
+6. AvgPool ≡ SumPool с **оптимизируемым** синаптическим весом (см. п.3). `pool_chartime` по умолчанию **3** (не 1): мягкая утечка NeuLIF, чтобы интенсивность выхода пула плавно следовала интенсивности входа. В LIF при спайке потенциал **не** сбрасывается в 0, а **декрементируется на величину порога**. При `weight_scale=1` и достаточном входе число выходных спайков близко к сумме по окну. Шаг 1 Jaccard моделирует тот же интегратор с `pool_chartime`.
 7. Свёртки TinyfromANN: millival `round(w * weight_scale * 1000)`, bias как в DLL (сток. стимул / `ThresholdExcess`).
 8. `TinyfromANN`: XML `<skip_first_conv>` (по умолчанию 1 — прежнее поведение: первый Conv2d уже сделан `fromFile` image). Для наращивания с feature-map CSV — `skip_first_conv=0`, первый слой среза может быть Conv/Pool/GAP; размер `fromFile` = `input.shape` архитектуры-среза.
 9. Период предъявления: `15 + delay`, delay = число секций TinyfromANN после текущего `fromFile` (каждый Conv/Pool/GAP, который DLL реально создаёт). Обновлять `record_presentation_period` / `ntact_per_image` / `object_presentation_period` / `reset_period` / `learning_time`. `ncopies` якоря не менять.
@@ -90,7 +90,7 @@
 - [ ] `tests/test_layerwise.py`: `meanjaccard` / `discretize` совпадают с определением C++ (`count > 1`, среднее по строкам).
 - [ ] Rate-code: `r = sat/2` → 5 спайков за 10 тактов; `r <= 0` → 0; `r >= sat` → 10.
 - [ ] Порядок стадий: `gap, conv5, pool2, conv4, conv3, pool1, conv2` (без conv1). Финальный `.nnc` после conv2 — `fromFile` `type="image"`, `skip_first_conv=1`, немасштабированные ядра.
-- [ ] Pool: 1 параметр; conv: 3 параметра.
+- [ ] Pool / GAP: 2 параметра (`saturation`, `weight_scale`); conv: 3 параметра.
 - [ ] Срез архитектуры GAP: `input.shape` 40×3×3, первый слой `AdaptiveAvgPool2d`.
 - [ ] `.nnc` стадии GAP: `text_values`, `skip_first_conv>0` отсутствует или 0, `model="smooth"`, `n` L = 70, Link GAP→L, `iniresource` с якоря.
 - [ ] Шаг 2: `step2_<layer>.jsonl` содержит `eval` на каждый `ArNIGPU`; повтор читает лучшую точку.

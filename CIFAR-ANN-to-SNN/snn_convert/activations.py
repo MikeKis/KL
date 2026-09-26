@@ -43,7 +43,7 @@ def n_params_for_layer(layer_type: str) -> int:
     if layer_type == "Conv2d":
         return 3
     if layer_type in {"AvgPool2d", "AdaptiveAvgPool2d"}:
-        return 1
+        return 2  # saturation + pool synapse weight_scale
     raise ValueError(f"no conversion params for {layer_type}")
 
 

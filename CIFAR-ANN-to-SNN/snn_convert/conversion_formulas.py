@@ -8,6 +8,7 @@ ARNI_SYNAPSE_SCALE = 1000.0
 ARNI_THRESHOLD_BASE = 8531.0
 STOCH_STIM_FACTOR = 2.0  # uniform stim draw; mean is half of max
 DEFAULT_CHARTIME = 10
+DEFAULT_POOL_CHARTIME = 3  # leak so pool output rate tracks input intensity
 COLANET_BASE_PERIOD = 15  # 10 tacts image + 5 silence when CoLaNET reads receptors
 DEFAULT_WEIGHT_SCALE = 1.0
 DEFAULT_BIAS_SCALE = 1.0
@@ -59,9 +60,13 @@ def data_norm_bias_scale(lambda_out: float) -> float:
     return 1.0 / float(lambda_out)
 
 
-def pool_synapse_millivals() -> int:
-    """AvgPool ≡ SumPool relay: one incoming spike exceeds THRESHOLD_BASE."""
-    return int(ARNI_THRESHOLD_BASE) + 1
+def pool_synapse_millivals(weight_scale: float = 1.0) -> int:
+    """
+    AvgPool ≡ SumPool synapse weight.
+    weight_scale=1 → THRESHOLD_BASE+1 (legacy one-spike-fires relay);
+    smaller scales need more coincident inputs to fire.
+    """
+    return max(1, int(round(float(weight_scale) * (ARNI_THRESHOLD_BASE + 1.0))))
 
 
 def bias_to_lif_property(

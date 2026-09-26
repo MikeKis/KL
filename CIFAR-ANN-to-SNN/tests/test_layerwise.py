@@ -130,12 +130,12 @@ def test_rate_code_half_and_clip():
 
 
 def test_sumpool_decrement_recovers_same_tact_except_last():
-    # 2x2, 1 channel, kernel 2 → 1 output.
+    # 2x2, 1 channel, kernel 2 → 1 output. chartime>1024 → no NeuLIF leak.
     trains = np.zeros((1, 10, 4), dtype=bool)
     trains[0, 0, 0] = True
     trains[0, 0, 1] = True  # two inputs on tact 0 → leftover fires on tact 1
     trains[0, 3, 2] = True
-    out = sumpool_trains(trains, 2, 2, 1, 2, 2)
+    out = sumpool_trains(trains, 2, 2, 1, 2, 2, chartime=2048)
     counts = trains_to_counts(out)
     assert counts.shape == (1, 1)
     assert int(counts[0, 0]) == 3
@@ -143,8 +143,17 @@ def test_sumpool_decrement_recovers_same_tact_except_last():
     late = np.zeros((1, 10, 4), dtype=bool)
     late[0, 9, 0] = True
     late[0, 9, 1] = True  # two inputs on the last tact: one spike, leftover lost
-    late_counts = trains_to_counts(sumpool_trains(late, 2, 2, 1, 2, 2))
+    late_counts = trains_to_counts(sumpool_trains(late, 2, 2, 1, 2, 2, chartime=2048))
     assert int(late_counts[0, 0]) == 1
+
+
+def test_sumpool_smaller_weight_needs_more_inputs():
+    trains = np.zeros((1, 4, 4), dtype=bool)
+    trains[0, 0, 0] = True
+    full = trains_to_counts(sumpool_trains(trains, 2, 2, 1, 2, 2, weight_scale=1.0))
+    weak = trains_to_counts(sumpool_trains(trains, 2, 2, 1, 2, 2, weight_scale=0.2))
+    assert int(full[0, 0]) == 1
+    assert int(weak[0, 0]) == 0
 
 
 def test_layerwise_step2_has_no_timeout_by_default():
@@ -279,8 +288,8 @@ def test_step2_classify_logs_each_arnigpu(tmp_path: Path, monkeypatch: pytest.Mo
 
 
 def test_param_counts():
-    assert n_params_for_layer("AvgPool2d") == 1
-    assert n_params_for_layer("AdaptiveAvgPool2d") == 1
+    assert n_params_for_layer("AvgPool2d") == 2
+    assert n_params_for_layer("AdaptiveAvgPool2d") == 2
     assert n_params_for_layer("Conv2d") == 3
 
 
@@ -399,10 +408,11 @@ def test_layerwise_gap_stage_writes_nnc(tmp_path: Path):
     assert 'from="GAP"' in xml
     assert "<iniresource>3.192</iniresource>" in xml
     assert log["stages"][0]["layer"] == "gap"
-    assert log["stages"][0]["n_params"] == 1
-    assert "step1_weight_scale" not in log["stages"][0]
+    assert log["stages"][0]["n_params"] == 2
+    assert "step1_weight_scale" in log["stages"][0]
     assert "step1_bias_scale" not in log["stages"][0]
-    assert '<layer name="gap">' not in xml
+    assert '<layer name="gap">' in xml
+    assert "<weight_scale>" in xml.split('name="gap"')[1]
     assert 0.0 <= log["stages"][0]["step1_meanjaccard"] <= 1.0
     assert all(s["layer"] != "stem" for s in log["stages"])
     assert (out / "stage_gap.nnc").is_file()
@@ -436,14 +446,14 @@ def test_layerwise_fresh_reruns_finished_step2(tmp_path: Path, monkeypatch: pyte
         json.dumps({"event": "done", "layer": "gap"}) + "\n", encoding="utf-8"
     )
     (out / "step2_gap_best.json").write_text(
-        json.dumps({"params": {"saturation": 9.9}, "accuracy_pct": 1.0}),
+        json.dumps({"params": {"saturation": 9.9, "weight_scale": 1.0}, "accuracy_pct": 1.0}),
         encoding="utf-8",
     )
     called: list[str] = []
 
     def fake_step2(**kwargs):
         called.append(str(kwargs["layer"]))
-        return np.array([1.5], dtype=np.float64), 12.0, {}
+        return np.array([1.5, 0.5], dtype=np.float64), 12.0, {}
 
     monkeypatch.setattr("snn_convert.layerwise._step2_classify", fake_step2)
     convert_layerwise(
@@ -455,7 +465,7 @@ def test_layerwise_fresh_reruns_finished_step2(tmp_path: Path, monkeypatch: pyte
         experiment_id="912",
         cfg=LayerwiseConfig(
             n_train=6,
-                        n_jaccard=8,
+            n_jaccard=8,
             max_stages=1,
             nm_iter=2,
             do_step2=True,

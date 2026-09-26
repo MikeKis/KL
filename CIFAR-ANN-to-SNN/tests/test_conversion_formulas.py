@@ -18,6 +18,9 @@ def test_scaled_synapse_weight_rounds():
 
 def test_pool_synapse_is_just_above_threshold():
     assert pool_synapse_millivals() == 8532
+    assert pool_synapse_millivals(1.0) == 8532
+    assert pool_synapse_millivals(0.5) == 4266
+    assert pool_synapse_millivals(0.0) == 1
 
 
 def test_positive_bias_is_stoch_stim():

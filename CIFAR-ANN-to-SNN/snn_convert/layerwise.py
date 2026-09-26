@@ -77,11 +77,15 @@ def _sat_grid(values: np.ndarray) -> list[float]:
 
 _WEIGHT_GRID = (1.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0)
 _BIAS_GRID = (0.25, 0.5, 1.0, 2.0, 4.0)
+# Pool synapse = weight_scale * (THRESHOLD_BASE+1); 1.0 = legacy relay.
+_POOL_WEIGHT_GRID = (0.05, 0.1, 0.125, 0.2, 0.25, 0.5, 0.75, 1.0)
 
 
 def _step2_param_names(n_par: int) -> list[str]:
     if int(n_par) <= 1:
         return ["saturation"]
+    if int(n_par) == 2:
+        return ["saturation", "weight_scale"]
     return ["saturation", "weight_scale", "bias_scale"]
 
 
@@ -283,7 +287,7 @@ def simulate_new_layer_counts(
     trains = rate_code_trains(maps_to_rows(input_nchw), saturation)
     if layer.type in {"AvgPool2d", "AdaptiveAvgPool2d"}:
         k, s = _pool_hw(layer, inp.h, inp.w)
-        out = sumpool_trains(trains, inp.h, inp.w, inp.c, k, s)
+        out = sumpool_trains(trains, inp.h, inp.w, inp.c, k, s, weight_scale=weight_scale)
         return trains_to_counts(out)
     if layer.type == "Conv2d":
         w = graph.weights[f"{layer.name}.weight"]
@@ -340,6 +344,14 @@ def _coarse_then_nm(
             f = fn(x)
             if f > best_f:
                 best_f, best_x = f, x
+    elif n_par == 2:
+        for sat in sat_candidates:
+            for ws in _POOL_WEIGHT_GRID:
+                n_coarse += 1
+                x = np.array([sat, ws], dtype=np.float64)
+                f = fn(x)
+                if f > best_f:
+                    best_f, best_x = f, x
     else:
         for sat in sat_candidates:
             for ws in _WEIGHT_GRID:
@@ -350,12 +362,19 @@ def _coarse_then_nm(
                     if f > best_f:
                         best_f, best_x = f, x
     if best_x is None:
-        best_x = np.array([sat_candidates[0]] + ([1.0, 1.0] if n_par > 1 else []), dtype=np.float64)
+        if n_par == 1:
+            best_x = np.array([sat_candidates[0]], dtype=np.float64)
+        elif n_par == 2:
+            best_x = np.array([sat_candidates[0], 1.0], dtype=np.float64)
+        else:
+            best_x = np.array([sat_candidates[0], 1.0, 1.0], dtype=np.float64)
         best_f = fn(best_x)
     sat_lo = max(min(sat_candidates) * 0.25, 1e-4)
     sat_hi = max(sat_candidates) * 2.0
     if n_par == 1:
         bounds = [(sat_lo, sat_hi)]
+    elif n_par == 2:
+        bounds = [(sat_lo, sat_hi), (0.01, 1.5)]
     else:
         bounds = [(sat_lo, sat_hi), (0.25, 256.0), (0.05, 16.0)]
     x_nm, f_nm, n_nm = nelder_mead_max(fn, best_x, bounds, max_iter=nm_iter, step=0.2)
@@ -501,14 +520,16 @@ def _completed_prefix(
 
 def _absorb_stage_params(stage: dict, frozen_scales: dict) -> float:
     sat = float(stage.get("step2_saturation", stage["step1_saturation"]))
-    if int(stage.get("n_params") or 1) > 1:
+    n_par = int(stage.get("n_params") or 1)
+    if n_par > 1:
         ws = stage.get("step2_weight_scale", stage.get("step1_weight_scale"))
-        bs = stage.get("step2_bias_scale", stage.get("step1_bias_scale"))
-        if ws is not None and bs is not None:
-            frozen_scales[str(stage["layer"])] = {
-                "weight_scale": float(ws),
-                "bias_scale": float(bs),
-            }
+        if ws is not None:
+            entry: dict[str, float] = {"weight_scale": float(ws)}
+            if n_par >= 3:
+                bs = stage.get("step2_bias_scale", stage.get("step1_bias_scale"))
+                if bs is not None:
+                    entry["bias_scale"] = float(bs)
+            frozen_scales[str(stage["layer"])] = entry
     return sat
 
 
@@ -517,6 +538,8 @@ def _step1_vec(stage: dict, n_par: int) -> np.ndarray:
     if int(n_par) <= 1:
         return np.array([sat], dtype=np.float64)
     ws = float(stage.get("step1_weight_scale", 1.0))
+    if int(n_par) == 2:
+        return np.array([sat, ws], dtype=np.float64)
     bs = float(stage.get("step1_bias_scale", 1.0))
     return np.array([sat, ws, bs], dtype=np.float64)
 
@@ -534,7 +557,14 @@ def _best_json_vec(out_dir: Path, layer: str, n_par: int) -> np.ndarray | None:
         return None
     if int(n_par) <= 1:
         return np.array([float(params["saturation"])], dtype=np.float64)
-    if "weight_scale" not in params or "bias_scale" not in params:
+    if "weight_scale" not in params:
+        return None
+    if int(n_par) == 2:
+        return np.array(
+            [float(params["saturation"]), float(params["weight_scale"])],
+            dtype=np.float64,
+        )
+    if "bias_scale" not in params:
         return None
     return np.array(
         [float(params["saturation"]), float(params["weight_scale"]), float(params["bias_scale"])],
@@ -792,6 +822,7 @@ def convert_layerwise(
             )
             if n_par > 1:
                 stage_log["step1_weight_scale"] = ws
+            if n_par > 2:
                 stage_log["step1_bias_scale"] = bs
             print(f"layerwise {stage_i + 1}/{len(stages)} {layer_name}: reuse step1, continue")
         else:
@@ -819,10 +850,13 @@ def convert_layerwise(
             }
             if n_par > 1:
                 stage_log["step1_weight_scale"] = ws
+            if n_par > 2:
                 stage_log["step1_bias_scale"] = bs
 
-        if layer.type == "Conv2d":
+        if n_par > 2:
             frozen_scales[layer_name] = {"weight_scale": float(ws), "bias_scale": float(bs)}
+        elif n_par > 1:
+            frozen_scales[layer_name] = {"weight_scale": float(ws)}
         params = replace(params, layer_scales=dict(frozen_scales), skip_first_conv=False, s=None)
 
         slice_in = inp_step
@@ -893,10 +927,13 @@ def convert_layerwise(
             sat = float(step2_x[0])
             if n_par > 1:
                 ws = float(step2_x[1])
-                bs = float(step2_x[2])
-                frozen_scales[layer_name] = {"weight_scale": ws, "bias_scale": bs}
                 stage_log["step2_weight_scale"] = ws
-                stage_log["step2_bias_scale"] = bs
+                if n_par > 2:
+                    bs = float(step2_x[2])
+                    frozen_scales[layer_name] = {"weight_scale": ws, "bias_scale": bs}
+                    stage_log["step2_bias_scale"] = bs
+                else:
+                    frozen_scales[layer_name] = {"weight_scale": ws}
             params = replace(params, layer_scales=dict(frozen_scales), s=None)
             _rewrite_stage(
                 graph,
@@ -933,7 +970,8 @@ def convert_layerwise(
         print(
             f"layerwise {stage_i + 1}/{len(stages)} {layer_name}: "
             f"jaccard={best_j:.4f} sat={sat:.5g}"
-            + (f" ws={ws:.5g} bs={bs:.5g}" if n_par > 1 else "")
+            + (f" ws={ws:.5g}" if n_par > 1 else "")
+            + (f" bs={bs:.5g}" if n_par > 2 else "")
         )
 
     if last_input_step_name == first.name and fromfile_done is None:
@@ -1174,10 +1212,10 @@ def _rewrite_stage(
     sat = float(vec[0])
     scales = dict(frozen_scales)
     if n_par > 1:
-        scales[layer_name] = {
-            "weight_scale": float(vec[1]),
-            "bias_scale": float(vec[2]),
-        }
+        entry: dict[str, float] = {"weight_scale": float(vec[1])}
+        if n_par > 2:
+            entry["bias_scale"] = float(vec[2])
+        scales[layer_name] = entry
     p = replace(params, layer_scales=scales, s=None, skip_first_conv=False)
     spec = sliced_architecture_dict(graph, layer_name, slice_in.c, slice_in.h, slice_in.w)
     last_arch.write_text(json.dumps(spec, indent=2), encoding="utf-8")
@@ -1213,6 +1251,8 @@ def _step2_classify(
 ) -> tuple[np.ndarray, float | None, dict]:
     if n_par == 1:
         bounds = [sat_bounds]
+    elif n_par == 2:
+        bounds = [sat_bounds, (0.01, 1.5)]
     else:
         bounds = [sat_bounds, (0.25, 256.0), (0.05, 16.0)]
     names = _step2_param_names(n_par)
