@@ -21,7 +21,7 @@
 1. Скрипт `CIFAR-ANN-SNN/extract_pre_fc_activations.py`: все 60 000 CIFAR-10, слои `conv2, pool1, conv3, conv4, pool2, conv5, gap` после ReLU/pool/GAP. По-прежнему писать `pre_fc_activations.csv` (flatten GAP, 40-D) для CoLaNET.
 2. Файлы: `artifacts/activations/<layer>.npy` — float32 NCHW, N=60000; `manifest.json`.
 3. `build_snn.py --mode layerwise` читает `--activations-dir` (по умолчанию `<ann-dir>/activations`). Нет файлов — ошибка со ссылкой на скрипт. Юнит-тесты с явным `frames_hwc` по-прежнему считают карты на месте.
-4. Индексация выборки шага 2 — те же индексы в 60k, что и у `select_layerwise_split`.
+4. Карты читаются в порядке `CIFAR10.bin` (0..59999). Шаг 1 Jaccard — префикс `[:n_jaccard]`; шаг 2 / CSV / `fromFile` — исходные `CIFAR10.bin` и `CIFAR10.target.txt` без семплирования.
 
 ## Нефункциональные требования
 
@@ -43,7 +43,7 @@
 ### Изменённые классы
 
 - `extract_pre_fc_activations.py` — выгрузка промежуточных карт.
-- `convert_layerwise` / `select_layerwise_indices` — чтение карт по индексам.
+- `convert_layerwise` — mmap карт по индексам 0..59999 (префикс для Jaccard).
 - `build_snn.py` — `--activations-dir`.
 
 ### Удалённые классы

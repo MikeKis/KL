@@ -82,9 +82,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--search-id", default="919", help="experiment id overwritten during joint search")
     p.add_argument("--joint-train", type=int, default=2000)
     p.add_argument("--joint-val", type=int, default=1000)
-    p.add_argument("--layerwise-train", type=int, default=50000, help="train images for layerwise step 2 (CIFAR train; default all 50000)")
-    p.add_argument("--layerwise-val", type=int, default=10000, help="ObjectClassifier leftover after learning; default CIFAR test when train is 50000")
-    p.add_argument("--layerwise-jaccard", type=int, default=800, help="images for step-1 meanjaccard")
+    p.add_argument(
+        "--layerwise-jaccard",
+        type=int,
+        default=800,
+        help="step-1 meanjaccard: first N images in CIFAR file order (no shuffle)",
+    )
     p.add_argument("--layerwise-max-stages", type=int, default=None, help="0=copy anchor only; default=all layers")
     p.add_argument("--layerwise-nm-iter", type=int, default=25)
     p.add_argument("--layerwise-search-id", default="913", help="experiment id for inner ArNIGPU evals")
@@ -170,7 +173,6 @@ def _stage_and_eval(
     data_files = [arts.convolution_file, arts.architecture_copy, arts.weights_copy]
     if mode == "layerwise":
         data_files.extend(out_dir.glob("*.csv"))
-        data_files.extend(out_dir / name for name in ("CIFAR10_layerwise.bin", "CIFAR10_layerwise.target.txt"))
     copy_data_files(workplace, data_files)
     if not args.images.is_file():
         print(f"warning: images not found at {args.images}", file=sys.stderr)
@@ -260,8 +262,6 @@ def _main_impl(args: argparse.Namespace) -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
         _preserve_previous_params(out_dir, args.mode)
         cfg = LayerwiseConfig(
-            n_train=args.layerwise_train,
-            n_val=args.layerwise_val,
             n_jaccard=args.layerwise_jaccard,
             max_stages=args.layerwise_max_stages,
             nm_iter=args.layerwise_nm_iter,

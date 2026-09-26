@@ -87,6 +87,14 @@ def load_cifar_hwc(images_path, n: int | None = None, *, train: bool = True) -> 
     return frames
 
 
+def load_cifar_all_hwc(images_path) -> np.ndarray:
+    """All 60 000 CIFAR frames in file order (train then test), HWC uint8."""
+    raw = np.fromfile(images_path, dtype=np.uint8)
+    if raw.size != 60000 * 32 * 32 * 3:
+        raise ConverterError(f"unexpected CIFAR bin size {raw.size}")
+    return raw.reshape(60000, 32, 32, 3)
+
+
 def load_cifar_labels(labels_path, n: int | None = None, *, train: bool = True) -> np.ndarray:
     labels = np.loadtxt(labels_path, dtype=np.int64)
     if labels.shape != (60000,):

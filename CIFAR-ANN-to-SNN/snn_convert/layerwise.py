@@ -44,11 +44,15 @@ from .theoretical import TheoreticalArtifacts
 from .uint8_fold import fold_first_conv_to_uint8
 
 
+# Full CIFAR-10 train; ObjectClassifier uses the remainder of CIFAR10.bin (test).
+CIFAR_N_TRAIN = 50000
+CIFAR_N_TOTAL = 60000
+
+
 @dataclass
 class LayerwiseConfig:
-    n_train: int = 50000
-    n_val: int = 10000  # ObjectClassifier leftover; CIFAR test when train takes all 50k
-    n_jaccard: int = 800
+    n_train: int = CIFAR_N_TRAIN  # step 2 CoLaNET learning; tests may shrink with frames_hwc
+    n_jaccard: int = 800  # step 1: first n images in CIFAR file order (no shuffle)
     max_stages: int | None = None
     nm_iter: int = 25
     seed: int = 42
@@ -69,74 +73,6 @@ def _sat_grid(values: np.ndarray) -> list[float]:
     grid.extend([mx, 1.5 * mx, 2.0 * mx, max(mx * 0.25, 1e-4)])
     out = sorted({max(g, 1e-4) for g in grid})
     return out
-
-
-def select_layerwise_indices(
-    *,
-    n_train_set: int,
-    n_test_set: int,
-    n_train: int,
-    n_val: int,
-    seed: int = 42,
-) -> np.ndarray:
-    """Indices into concatenated CIFAR train||test (0..n_train_set-1, then test)."""
-    n_train = int(n_train)
-    n_val = int(n_val)
-    n_train_set = int(n_train_set)
-    n_test_set = int(n_test_set)
-    if n_train < 0 or n_val < 0:
-        raise ConverterError("layerwise-train / layerwise-val must be non-negative")
-    if n_train > n_train_set:
-        raise ConverterError(f"layerwise-train {n_train} larger than CIFAR train {n_train_set}")
-    rng = np.random.default_rng(seed)
-    perm = rng.permutation(n_train_set)
-    train_idx = perm[:n_train]
-    if n_val <= 0:
-        return train_idx.astype(np.int64, copy=False)
-    leftover = perm[n_train:]
-    if n_val <= len(leftover):
-        return np.concatenate([train_idx, leftover[:n_val]]).astype(np.int64, copy=False)
-    need = n_val - len(leftover)
-    if need > n_test_set:
-        raise ConverterError(
-            f"need {n_val} val images, only {len(leftover)} train leftover + {n_test_set} test"
-        )
-    test_idx = np.arange(n_train_set, n_train_set + need, dtype=np.int64)
-    parts = [train_idx]
-    if len(leftover):
-        parts.append(leftover)
-    parts.append(test_idx)
-    return np.concatenate(parts).astype(np.int64, copy=False)
-
-
-def select_layerwise_split(
-    train_frames: np.ndarray,
-    train_labels: np.ndarray | None,
-    test_frames: np.ndarray,
-    test_labels: np.ndarray | None,
-    *,
-    n_train: int,
-    n_val: int,
-    seed: int = 42,
-) -> tuple[np.ndarray, np.ndarray | None]:
-    """
-    CoLaNET train objects first, then leftover for ObjectClassifier accuracy.
-    If n_train + n_val fits in CIFAR train, val is a train hold-out.
-    If n_train takes the whole train, val is taken from CIFAR test (same as 1.nnc).
-    """
-    idx = select_layerwise_indices(
-        n_train_set=len(train_frames),
-        n_test_set=len(test_frames),
-        n_train=n_train,
-        n_val=n_val,
-        seed=seed,
-    )
-    stacked_x = np.concatenate([train_frames, test_frames], axis=0)
-    frames = stacked_x[idx]
-    if train_labels is None:
-        return frames, None
-    stacked_y = np.concatenate([train_labels, test_labels], axis=0)
-    return frames, stacked_y[idx]
 
 
 _WEIGHT_GRID = (1.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0)
@@ -640,7 +576,7 @@ def _commit_progress(
             "stages": log.get("stages"),
             "anchor": log.get("anchor"),
             "n_train": cfg.n_train,
-            "n_val": cfg.n_val,
+            "n_jaccard": cfg.n_jaccard,
             "current_sat": float(current_sat),
             "frozen_scales": frozen_scales,
         },
@@ -720,9 +656,12 @@ def convert_layerwise(
         return arts, log
 
     current_sat = float(anchor.saturation_level)
+    # Step 2 always learns on the full CIFAR train of the data files in Workplace.
+    # Unit tests pass frames_hwc and may shrink n_train to match that toy set.
+    n_train_images = int(cfg.n_train) if caller_frames else CIFAR_N_TRAIN
     params = replace(
         anchor.params,
-        n_train_images=int(cfg.n_train),
+        n_train_images=n_train_images,
         layer_scales={},
         skip_first_conv=False,
         s=None,
@@ -783,38 +722,21 @@ def convert_layerwise(
     maps = None
     x_nchw = None
     n_j = 0
-    subset_images = out_dir / "CIFAR10_layerwise.bin"
-    subset_labels = out_dir / "CIFAR10_layerwise.target.txt"
 
     if not nothing_left:
         if frames_hwc is None:
             if images_path is None or not Path(images_path).is_file():
                 raise ConverterError("layerwise needs CIFAR images for activations")
-            from .ann_forward import load_cifar_hwc, load_cifar_labels
+            from .ann_forward import load_cifar_all_hwc
 
-            train_frames = load_cifar_hwc(images_path, n=None, train=True)
-            train_labels = load_cifar_labels(labels_path, n=None, train=True) if labels_path else None
-            test_frames = load_cifar_hwc(images_path, n=None, train=False)
-            test_labels = load_cifar_labels(labels_path, n=None, train=False) if labels_path else None
-            frames_hwc, labels = select_layerwise_split(
-                train_frames,
-                train_labels,
-                test_frames,
-                test_labels,
-                n_train=cfg.n_train,
-                n_val=cfg.n_val,
-                seed=cfg.seed,
-            )
-            split_idx = select_layerwise_indices(
-                n_train_set=len(train_frames),
-                n_test_set=len(test_frames),
-                n_train=cfg.n_train,
-                n_val=cfg.n_val,
-                seed=cfg.seed,
-            )
+            frames_hwc = load_cifar_all_hwc(images_path)
+            if labels_path is not None and Path(labels_path).is_file():
+                labels = np.loadtxt(labels_path, dtype=np.int64)
+            split_idx = np.arange(CIFAR_N_TOTAL, dtype=np.int64)
         else:
             split_idx = np.arange(len(frames_hwc), dtype=np.int64)
 
+        # Step 1: first n_jaccard records in file order (no shuffle / resample).
         n_j = min(int(cfg.n_jaccard), len(frames_hwc))
         x_nchw = uint8_to_nchw(frames_hwc)
         act_dir = Path(activations_dir) if activations_dir is not None else default_activations_dir(graph)
@@ -832,10 +754,7 @@ def convert_layerwise(
                     f"--activations-dir {act_dir}"
                 )
             maps = LayerActivationStore(act_dir, split_idx, graph=graph, x_nchw_u8=x_nchw)
-            print(f"layerwise maps: {act_dir} ({len(split_idx)} images)")
-        np.ascontiguousarray(frames_hwc).tofile(subset_images)
-        if labels is not None:
-            np.savetxt(subset_labels, labels, fmt="%d")
+            print(f"layerwise maps: {act_dir} ({len(split_idx)} images, jaccard first {n_j})")
 
     last_input_step_name: str | None = None
     for stage_i, layer_name in enumerate(stages):
@@ -917,7 +836,7 @@ def convert_layerwise(
             params=params,
             source=csv_name,
             saturation_level=sat,
-            target_file=subset_labels.name if labels is not None else target_file,
+            target_file=target_file,
             architecture_file=last_arch.name,
             weights_file=last_weights.name,
         )
@@ -948,7 +867,6 @@ def convert_layerwise(
                         last_nnc,
                         last_arch,
                         last_weights,
-                        subset_labels,
                         target_file,
                         input_nchw,
                         slice_in,
@@ -967,8 +885,6 @@ def convert_layerwise(
                         last_arch,
                         last_weights,
                         conv_path,
-                        subset_images,
-                        subset_labels,
                         out_dir / f"{layer_name}_input.csv",
                     ),
                     layer=layer_name,
@@ -993,7 +909,6 @@ def convert_layerwise(
                 last_nnc,
                 last_arch,
                 last_weights,
-                subset_labels,
                 target_file,
                 input_nchw,
                 slice_in,
@@ -1035,8 +950,7 @@ def convert_layerwise(
             conv_path,
             w_u8,
             b_u8,
-            subset_images,
-            subset_labels,
+            image_source,
             target_file,
             n_j,
             cfg,
@@ -1078,21 +992,19 @@ def _write_image_nnc(
     conv_path,
     w_u8,
     b_u8,
-    subset_images,
-    subset_labels,
-    target_file,
+    image_source: str,
+    target_file: str,
 ) -> None:
     spec = json.loads(graph.path.read_text(encoding="utf-8"))
     last_arch.write_text(json.dumps(spec, indent=2), encoding="utf-8")
     p = replace(params, skip_first_conv=True)
     p.ntact_per_image = stack_period_for_slice(_slice_layers(spec), skip_first_conv=True)
     write_convolution_file(conv_path, w_u8)
-    tgt = subset_labels.name if Path(subset_labels).is_file() else target_file
     xml = build_image_nnc(
         graph,
         params=p,
-        image_source=Path(subset_images).name,
-        target_file=tgt,
+        image_source=image_source,
+        target_file=target_file,
         convolution_file=Path(conv_path).name,
         architecture_file=Path(last_arch).name,
         weights_file=Path(last_weights).name,
@@ -1114,9 +1026,8 @@ def _finalize_digital_fromfile(
     conv_path,
     w_u8,
     b_u8,
-    subset_images,
-    subset_labels,
-    target_file,
+    image_source: str,
+    target_file: str,
     n_j,
     cfg,
     log,
@@ -1162,8 +1073,7 @@ def _finalize_digital_fromfile(
         conv_path=conv_path,
         w_u8=w_u8,
         b_u8=b_u8,
-        subset_images=subset_images,
-        subset_labels=subset_labels,
+        image_source=image_source,
         target_file=target_file,
     )
     stage_log = {
@@ -1191,8 +1101,7 @@ def _finalize_digital_fromfile(
                 conv_path=conv_path,
                 w_u8=w_u8,
                 b_u8=b_u8,
-                subset_images=subset_images,
-                subset_labels=subset_labels,
+                image_source=image_source,
                 target_file=target_file,
             )
 
@@ -1220,8 +1129,6 @@ def _finalize_digital_fromfile(
                     last_arch,
                     last_weights,
                     conv_path,
-                    subset_images,
-                    subset_labels,
                 ),
                 layer="fromfile",
                 log_path=jsonl_path,
@@ -1260,7 +1167,6 @@ def _rewrite_stage(
     last_nnc,
     last_arch,
     last_weights,
-    subset_labels,
     target_file,
     input_nchw,
     slice_in,
@@ -1273,7 +1179,6 @@ def _rewrite_stage(
             "bias_scale": float(vec[2]),
         }
     p = replace(params, layer_scales=scales, s=None, skip_first_conv=False)
-    tgt = subset_labels.name if Path(subset_labels).is_file() else target_file
     spec = sliced_architecture_dict(graph, layer_name, slice_in.c, slice_in.h, slice_in.w)
     last_arch.write_text(json.dumps(spec, indent=2), encoding="utf-8")
     p.ntact_per_image = stack_period_for_slice(_slice_layers(spec), skip_first_conv=False)
@@ -1283,7 +1188,7 @@ def _rewrite_stage(
         params=p,
         source=csv_name,
         saturation_level=sat,
-        target_file=tgt,
+        target_file=target_file,
         architecture_file=last_arch.name,
         weights_file=last_weights.name,
     )

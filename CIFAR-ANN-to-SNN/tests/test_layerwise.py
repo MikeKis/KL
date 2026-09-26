@@ -16,8 +16,6 @@ from snn_convert.layerwise import (
     LayerwiseConfig,
     Step2TrialLog,
     convert_layerwise,
-    select_layerwise_indices,
-    select_layerwise_split,
     _step2_classify,
 )
 from snn_convert.layerwise_nnc import parse_colanet_anchor, sliced_architecture_dict
@@ -147,38 +145,6 @@ def test_sumpool_decrement_recovers_same_tact_except_last():
     late[0, 9, 1] = True  # two inputs on the last tact: one spike, leftover lost
     late_counts = trains_to_counts(sumpool_trains(late, 2, 2, 1, 2, 2))
     assert int(late_counts[0, 0]) == 1
-
-
-def test_select_layerwise_split_all_train_uses_cifar_test():
-    train_x = np.arange(10, dtype=np.uint8).reshape(10, 1, 1, 1)
-    train_y = np.arange(10)
-    test_x = np.arange(100, 105, dtype=np.uint8).reshape(5, 1, 1, 1)
-    test_y = np.arange(100, 105)
-    frames, labs = select_layerwise_split(
-        train_x, train_y, test_x, test_y, n_train=10, n_val=5, seed=0
-    )
-    assert frames.shape[0] == 15
-    assert set(labs[:10].tolist()) == set(range(10))
-    assert labs[10:].tolist() == [100, 101, 102, 103, 104]
-
-
-def test_select_layerwise_split_small_holdout_stays_in_train():
-    train_x = np.arange(10, dtype=np.uint8).reshape(10, 1, 1, 1)
-    train_y = np.arange(10)
-    test_x = np.arange(100, 105, dtype=np.uint8).reshape(5, 1, 1, 1)
-    test_y = np.arange(100, 105)
-    frames, labs = select_layerwise_split(
-        train_x, train_y, test_x, test_y, n_train=6, n_val=2, seed=1
-    )
-    assert frames.shape[0] == 8
-    assert all(int(v) < 10 for v in labs)
-
-
-def test_select_layerwise_indices_match_split():
-    idx = select_layerwise_indices(n_train_set=10, n_test_set=5, n_train=10, n_val=5, seed=0)
-    assert idx.shape == (15,)
-    assert set(idx[:10].tolist()) == set(range(10))
-    assert idx[10:].tolist() == [10, 11, 12, 13, 14]
 
 
 def test_layerwise_step2_has_no_timeout_by_default():
@@ -418,8 +384,7 @@ def test_layerwise_gap_stage_writes_nnc(tmp_path: Path):
         experiment_id="912",
         cfg=LayerwiseConfig(
             n_train=6,
-            n_val=2,
-            n_jaccard=8,
+                        n_jaccard=8,
             max_stages=1,
             nm_iter=3,
             do_step2=False,
@@ -490,8 +455,7 @@ def test_layerwise_fresh_reruns_finished_step2(tmp_path: Path, monkeypatch: pyte
         experiment_id="912",
         cfg=LayerwiseConfig(
             n_train=6,
-            n_val=2,
-            n_jaccard=8,
+                        n_jaccard=8,
             max_stages=1,
             nm_iter=2,
             do_step2=True,
@@ -527,7 +491,7 @@ def test_layerwise_resumes_after_partial_stack(tmp_path: Path, monkeypatch: pyte
     frames = rng.integers(0, 256, size=(8, 16, 16, 3), dtype=np.uint8)
     labels = rng.integers(0, 4, size=(8,), dtype=np.int64)
     out = tmp_path / "out"
-    cfg1 = LayerwiseConfig(n_train=6, n_val=2, n_jaccard=8, max_stages=1, nm_iter=2, do_step2=False)
+    cfg1 = LayerwiseConfig(n_train=6, n_jaccard=8, max_stages=1, nm_iter=2, do_step2=False)
     _, log1 = convert_layerwise(
         g,
         out,
@@ -548,7 +512,7 @@ def test_layerwise_resumes_after_partial_stack(tmp_path: Path, monkeypatch: pyte
         return orig(*args, **kwargs)
 
     monkeypatch.setattr(lw, "_coarse_then_nm", spy)
-    cfg2 = LayerwiseConfig(n_train=6, n_val=2, n_jaccard=8, max_stages=None, nm_iter=2, do_step2=False)
+    cfg2 = LayerwiseConfig(n_train=6, n_jaccard=8, max_stages=None, nm_iter=2, do_step2=False)
     _, log2 = convert_layerwise(
         g,
         out,
@@ -600,8 +564,7 @@ def test_layerwise_final_uses_digital_fromfile_not_spiking_conv1(tmp_path: Path)
         experiment_id="912",
         cfg=LayerwiseConfig(
             n_train=4,
-            n_val=2,
-            n_jaccard=6,
+                        n_jaccard=6,
             max_stages=None,
             nm_iter=2,
             do_step2=False,
