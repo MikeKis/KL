@@ -429,6 +429,12 @@ def test_layerwise_gap_stage_writes_nnc(tmp_path: Path):
     assert 0.0 <= log["stages"][0]["step1_meanjaccard"] <= 1.0
     assert all(s["layer"] != "stem" for s in log["stages"])
     assert (out / "stage_gap.nnc").is_file()
+    step1_log = out / "step1_gap.jsonl"
+    assert step1_log.is_file()
+    recs = [json.loads(line) for line in step1_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert any(r.get("event") == "eval" and "meanjaccard" in r for r in recs)
+    assert any(r.get("event") == "done" for r in recs)
+    assert (out / "step1_gap_best.json").is_file()
     assert log["stages"][0].get("complete") is True
 
 
@@ -729,7 +735,7 @@ def test_step1_probe_reads_pt_protocol(tmp_path: Path, monkeypatch: pytest.Monke
     )
     target = np.array([[2, 0], [2, 0]], dtype=np.int32)
     score = probe.evaluate(np.array([1.0, 3.0]), 2, target)
-    assert seen["extra"] == ["-Pt", "-T8"]
+    assert seen["extra"] == ["-W", "-Pt", "-T8"]
     assert score == 1.0
     xml = (out / "probe_gap.nnc").read_text(encoding="utf-8")
     assert 'lib="TinyfromANN"' in xml

@@ -63,7 +63,7 @@ class LayerwiseConfig:
     n_train: int = CIFAR_N_TRAIN  # step 2 CoLaNET learning; tests may shrink with frames_hwc
     n_jaccard: int = 800  # step 1: first n images in CIFAR file order (no shuffle)
     max_stages: int | None = None
-    nm_iter: int = 25
+    nm_iter: int = 100  # step 1; step 2 stays at the old half-of-25 budget
     seed: int = 42
     do_step2: bool = True
     trial_timeout: float | None = None  # None = no ArNIGPU timeout on step 2
@@ -244,6 +244,150 @@ class Step2TrialLog:
         self.best_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _step2_nm_iter(step1_iter: int) -> int:
+    """Step 2 keeps the budget it had when step 1 was capped at 25 iterations."""
+    return max(8, min(int(step1_iter), 25) // 2)
+
+
+class Step1TrialLog:
+    """JSONL of every step-1 Nelder–Mead eval; flushed so a kill keeps completed trials."""
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        layer: str,
+        n_par: int,
+        param_names: list[str],
+        bounds: list[tuple[float, float]],
+        x0,
+        search_id,
+    ) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.best_path = self.path.with_name(f"{self.path.stem}_best.json")
+        self.layer = layer
+        self.n_par = int(n_par)
+        self.param_names = list(param_names)
+        self.n_logged = 0
+        self.best_j: float | None = None
+        self.best_x: np.ndarray | None = None
+        self.cache: dict[tuple[float, ...], float] = {}
+        if self.path.is_file():
+            self._load()
+        self._append(
+            {
+                "event": "start",
+                "layer": layer,
+                "param_names": self.param_names,
+                "bounds": [[float(a), float(b)] for a, b in bounds],
+                "x0": [float(v) for v in np.asarray(x0, dtype=np.float64).ravel()],
+                "search_id": str(search_id),
+                "resumed_evals": self.n_logged,
+                "resumed_best_meanjaccard": self.best_j,
+                "utc": _utc_now(),
+            }
+        )
+
+    def params_dict(self, vec) -> dict[str, float]:
+        arr = np.asarray(vec, dtype=np.float64).ravel()
+        return {self.param_names[i]: float(arr[i]) for i in range(self.n_par)}
+
+    def cached_score(self, vec) -> float | None:
+        return self.cache.get(_vec_key(vec))
+
+    def record_eval(self, vec, score: float, *, elapsed_s: float, cached: bool = False) -> None:
+        j = float(score)
+        x = np.asarray(vec, dtype=np.float64).ravel()[: self.n_par].copy()
+        self.cache[_vec_key(x)] = j
+        if self.best_j is None or j > self.best_j:
+            self.best_j = j
+            self.best_x = x
+        if not cached:
+            self.n_logged += 1
+        self._append(
+            {
+                "event": "eval",
+                "eval": self.n_logged,
+                "layer": self.layer,
+                "params": self.params_dict(x),
+                "meanjaccard": j,
+                "elapsed_s": round(float(elapsed_s), 3),
+                "cached": bool(cached),
+                "best_meanjaccard": self.best_j,
+                "best_params": None if self.best_x is None else self.params_dict(self.best_x),
+                "utc": _utc_now(),
+            }
+        )
+        self._write_best()
+
+    def record_done(self, best_x, best_j: float) -> None:
+        self._append(
+            {
+                "event": "done",
+                "layer": self.layer,
+                "params": self.params_dict(best_x),
+                "meanjaccard": float(best_j),
+                "n_eval": self.n_logged,
+                "utc": _utc_now(),
+            }
+        )
+        x = np.asarray(best_x, dtype=np.float64).ravel()[: self.n_par].copy()
+        if self.best_j is None or float(best_j) >= self.best_j:
+            self.best_j = float(best_j)
+            self.best_x = x
+        self._write_best()
+
+    def _load(self) -> None:
+        try:
+            lines = self.path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("event") != "eval" or rec.get("cached"):
+                continue
+            params = rec.get("params") or {}
+            try:
+                x = np.array([float(params[n]) for n in self.param_names], dtype=np.float64)
+            except (KeyError, TypeError, ValueError):
+                continue
+            self.n_logged += 1
+            if rec.get("meanjaccard") is None:
+                continue
+            j = float(rec["meanjaccard"])
+            self.cache[_vec_key(x)] = j
+            if self.best_j is None or j > self.best_j:
+                self.best_j = j
+                self.best_x = x
+
+    def _append(self, rec: dict) -> None:
+        payload = json.dumps(rec, ensure_ascii=False, default=str) + "\n"
+        with self.path.open("a", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+
+    def _write_best(self) -> None:
+        if self.best_x is None:
+            return
+        payload = {
+            "layer": self.layer,
+            "eval": self.n_logged,
+            "params": self.params_dict(self.best_x),
+            "meanjaccard": self.best_j,
+            "log": str(self.path),
+            "utc": _utc_now(),
+        }
+        self.best_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def _slice_layers(spec: dict) -> list[SimpleNamespace]:
     return [SimpleNamespace(type=L["type"], name=L["name"]) for L in spec["layers"]]
 
@@ -316,7 +460,7 @@ class Step1Probe:
             self.exp_dir,
             self.search_id,
             cwd=self.workplace,
-            extra_args=["-Pt", f"-T{n_tacts}"],
+            extra_args=["-W", "-Pt", f"-T{n_tacts}"],
             timeout=self.timeout,
             log_dir=self.out_dir,
         )
@@ -436,6 +580,49 @@ def _nm_from_start(
     return x_nm, float(f_nm), meta
 
 
+def _run_step1_nm(
+    fn,
+    x0: np.ndarray,
+    n_par: int,
+    *,
+    nm_iter: int,
+    sat_info: dict | None,
+    log_path: Path,
+    layer: str,
+    search_id: str,
+) -> tuple[np.ndarray, float, dict]:
+    names = _step2_param_names(n_par)
+    bounds = _nm_bounds(np.asarray(x0, dtype=np.float64), n_par)
+    trial = Step1TrialLog(
+        log_path,
+        layer=layer,
+        n_par=n_par,
+        param_names=names,
+        bounds=bounds,
+        x0=x0,
+        search_id=search_id,
+    )
+    start = trial.best_x.copy() if trial.best_x is not None else np.asarray(x0, dtype=np.float64)
+
+    def logged(vec):
+        hit = trial.cached_score(vec)
+        if hit is not None:
+            trial.record_eval(vec, hit, elapsed_s=0.0, cached=True)
+            return hit
+        t0 = time.perf_counter()
+        score = float(fn(vec))
+        trial.record_eval(vec, score, elapsed_s=time.perf_counter() - t0)
+        return score
+
+    best_x, best_j, meta = _nm_from_start(logged, start, n_par, nm_iter=nm_iter, sat_info=sat_info)
+    trial.record_done(best_x, best_j)
+    meta["log"] = str(trial.path)
+    meta["best_json"] = str(trial.best_path)
+    if trial.n_logged:
+        meta["n_logged"] = trial.n_logged
+    return best_x, best_j, meta
+
+
 def _copy_dlls(exp_dir: Path) -> None:
     copy_arni_plugins(exp_dir)
 
@@ -457,7 +644,12 @@ def _stage_snapshot_path(out_dir: Path, layer: str) -> Path:
 def _discard_step2_logs(out_dir: Path) -> None:
     """Drop finished step-2 JSONL so --layerwise-fresh actually re-runs ArNIGPU."""
     out = Path(out_dir)
-    for path in (*out.glob("step2_*.jsonl"), *out.glob("step2_*_best.json")):
+    for path in (
+        *out.glob("step1_*.jsonl"),
+        *out.glob("step1_*_best.json"),
+        *out.glob("step2_*.jsonl"),
+        *out.glob("step2_*_best.json"),
+    ):
         try:
             path.unlink()
         except FileNotFoundError:
@@ -584,6 +776,36 @@ def _absorb_stage_params(stage: dict, frozen_scales: dict) -> float:
                     entry["bias_scale"] = float(bs)
             frozen_scales[str(stage["layer"])] = entry
     return sat
+
+
+def _finished_step1(out_dir: Path, layer: str, n_par: int) -> tuple[np.ndarray, float] | None:
+    log_path = Path(out_dir) / f"step1_{layer}.jsonl"
+    best_path = Path(out_dir) / f"step1_{layer}_best.json"
+    if not _jsonl_has_done(log_path) or not best_path.is_file():
+        return None
+    try:
+        best = json.loads(best_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    params = best.get("params") or {}
+    if "saturation" not in params:
+        return None
+    n = int(n_par)
+    if n <= 1:
+        vec = np.array([float(params["saturation"])], dtype=np.float64)
+    elif n == 2:
+        if "weight_scale" not in params:
+            return None
+        vec = np.array([float(params["saturation"]), float(params["weight_scale"])], dtype=np.float64)
+    else:
+        if "weight_scale" not in params or "bias_scale" not in params:
+            return None
+        vec = np.array(
+            [float(params["saturation"]), float(params["weight_scale"]), float(params["bias_scale"])],
+            dtype=np.float64,
+        )
+    score = best.get("meanjaccard")
+    return vec, 0.0 if score is None else float(score)
 
 
 def _step1_vec(stage: dict, n_par: int) -> np.ndarray:
@@ -903,7 +1125,7 @@ def convert_layerwise(
                     timeout=cfg.trial_timeout,
                 )
                 print(
-                    f"layerwise {layer_name}: step1 ArNIGPU -Pt id={cfg.search_id} "
+                    f"layerwise {layer_name}: step1 ArNIGPU -W -Pt id={cfg.search_id} "
                     f"images={probe.n_images} period={probe.period}"
                 )
 
@@ -911,9 +1133,23 @@ def convert_layerwise(
                 return _jaccard_objective(_ln, _tg, vec, _np, _probe)
 
             x0, sat_info = _step1_start(input_j, n_par)
-            best_x, best_j, meta = _nm_from_start(
-                fn, x0, n_par, nm_iter=cfg.nm_iter, sat_info=sat_info
-            )
+            step1_log = out_dir / f"step1_{layer_name}.jsonl"
+            finished = None if cfg.fresh else _finished_step1(out_dir, layer_name, n_par)
+            if finished is not None:
+                best_x, best_j = finished
+                meta = {"resumed_done": True, "log": str(step1_log)}
+                print(f"layerwise {layer_name}: reuse finished step1 log")
+            else:
+                best_x, best_j, meta = _run_step1_nm(
+                    fn,
+                    x0,
+                    n_par,
+                    nm_iter=cfg.nm_iter,
+                    sat_info=sat_info,
+                    log_path=step1_log,
+                    layer=layer_name,
+                    search_id=str(cfg.search_id),
+                )
             meta["simulator"] = "arnigpu" if probe is not None else "skipped"
             sat = float(best_x[0])
             ws = float(best_x[1]) if n_par > 1 else None
@@ -925,6 +1161,7 @@ def convert_layerwise(
                 "step1_saturation": sat,
                 "step1_meanjaccard": best_j,
                 "step1_meta": meta,
+                "step1_trial_log": str(step1_log),
                 "complete": False,
             }
             if n_par > 1:
@@ -992,7 +1229,7 @@ def convert_layerwise(
                     search_id=cfg.search_id,
                     arnigpu=arnigpu,
                     timeout=cfg.trial_timeout,
-                    nm_iter=max(8, cfg.nm_iter // 2),
+                    nm_iter=_step2_nm_iter(cfg.nm_iter),
                     stage_files=(
                         last_nnc,
                         last_arch,
@@ -1177,9 +1414,23 @@ def _finalize_digital_fromfile(
             return meanjaccard(target, pred)
 
         x0, sat_info = _step1_start(digital, 1)
-        best_x, best_j, meta = _nm_from_start(
-            fn, x0, 1, nm_iter=cfg.nm_iter, sat_info=sat_info
-        )
+        step1_log = out_dir / "step1_fromfile.jsonl"
+        finished = None if cfg.fresh else _finished_step1(out_dir, "fromfile", 1)
+        if finished is not None:
+            best_x, best_j = finished
+            meta = {"resumed_done": True, "log": str(step1_log)}
+            print("layerwise fromfile: reuse finished step1 log")
+        else:
+            best_x, best_j, meta = _run_step1_nm(
+                fn,
+                x0,
+                1,
+                nm_iter=cfg.nm_iter,
+                sat_info=sat_info,
+                log_path=step1_log,
+                layer="fromfile",
+                search_id=str(cfg.search_id),
+            )
         s = float(best_x[0])
     params = replace(params, layer_scales=dict(frozen_scales), skip_first_conv=True, s=s)
     _write_image_nnc(
@@ -1201,6 +1452,7 @@ def _finalize_digital_fromfile(
         "step1_saturation": s,
         "step1_meanjaccard": best_j,
         "step1_meta": meta,
+        "step1_trial_log": str(out_dir / "step1_fromfile.jsonl"),
         "note": "first Conv2d stays digital in fromFile; only s is fit",
         "complete": False,
     }
@@ -1241,7 +1493,7 @@ def _finalize_digital_fromfile(
                 search_id=cfg.search_id,
                 arnigpu=arnigpu,
                 timeout=cfg.trial_timeout,
-                nm_iter=max(8, cfg.nm_iter // 2),
+                nm_iter=_step2_nm_iter(cfg.nm_iter),
                 stage_files=(
                     last_nnc,
                     last_arch,
