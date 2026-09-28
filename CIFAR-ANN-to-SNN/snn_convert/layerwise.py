@@ -34,6 +34,7 @@ from .layerwise_nnc import (
     build_layer_probe_nnc,
     build_text_values_nnc,
     parse_colanet_anchor,
+    probe_presentation_period,
     single_layer_architecture_dict,
     sliced_architecture_dict,
     stack_period_for_slice,
@@ -351,8 +352,7 @@ def _make_step1_probe(
     timeout: float | None,
 ) -> Step1Probe:
     inp = input_step_for_layer(graph, layer_name)
-    tail = sliced_architecture_dict(graph, layer_name, inp.c, inp.h, inp.w)
-    period = stack_period_for_slice(_slice_layers(tail), skip_first_conv=False)
+    period = probe_presentation_period(params.tpres)
     arch = single_layer_architecture_dict(graph, layer_name, inp.c, inp.h, inp.w)
     arch_name = f"probe_{layer_name}_architecture.json"
     csv_name = f"probe_{layer_name}_input.csv"

@@ -22,6 +22,7 @@ from snn_convert.layerwise import (
 from snn_convert.layerwise_nnc import (
     build_layer_probe_nnc,
     parse_colanet_anchor,
+    probe_presentation_period,
     sliced_architecture_dict,
 )
 from snn_convert.nnc_builder import ConversionParams
@@ -666,7 +667,7 @@ def test_layer_probe_nnc_is_tinyfromann_without_colanet():
         saturation_level=1.5,
         architecture_file="probe_gap_architecture.json",
         weights_file="weights_dump.txt",
-        period=16,
+        period=probe_presentation_period(10),
     )
     assert 'lib="TinyfromANN"' in xml
     assert "<skip_first_conv>0</skip_first_conv>" in xml
@@ -675,6 +676,9 @@ def test_layer_probe_nnc_is_tinyfromann_without_colanet():
     assert "CoLaNET" not in xml
     assert "ObjectClassifier" not in xml
     assert "<bias_scale>" not in xml
+    assert "<record_presentation_time>10</record_presentation_time>" in xml
+    assert "<record_presentation_period>11</record_presentation_period>" in xml
+    assert probe_presentation_period(10) == 11
 
 
 def test_step1_probe_reads_pt_protocol(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

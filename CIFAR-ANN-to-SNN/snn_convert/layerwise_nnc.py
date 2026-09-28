@@ -406,3 +406,11 @@ def build_image_nnc(
 
 def stack_period_for_slice(slice_layers, *, skip_first_conv: bool) -> int:
     return COLANET_BASE_PERIOD + ann_stack_delay(slice_layers, skip_first_conv=skip_first_conv)
+
+
+def probe_presentation_period(tpres: int = 10) -> int:
+    """Step-1 probe: image presentation plus one tact for the single TinyfromANN layer.
+
+    CoLaNET's five silent tacts are not part of this net.
+    """
+    return int(tpres) + 1
