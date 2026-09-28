@@ -317,6 +317,7 @@ def build_text_values_nnc(
         <weights>{escape(weights_file)}</weights>
         <chartime>{params.chartime}</chartime>
         <pool_chartime>{params.pool_chartime}</pool_chartime>
+        <reset_period>{period}</reset_period>
 {skip_xml}{layers_block}      </args>
     </Implementation>
   </NETWORK>
@@ -370,6 +371,7 @@ def build_layer_probe_nnc(
         <weights>{escape(weights_file)}</weights>
         <chartime>{params.chartime}</chartime>
         <pool_chartime>{params.pool_chartime}</pool_chartime>
+        <reset_period>{int(period)}</reset_period>
         <skip_first_conv>0</skip_first_conv>
 {layers_block}      </args>
     </Implementation>

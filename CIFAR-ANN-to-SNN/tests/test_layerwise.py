@@ -414,6 +414,8 @@ def test_layerwise_gap_stage_writes_nnc(tmp_path: Path):
     xml = arts.nnc_path.read_text(encoding="utf-8")
     assert 'type="text_values"' in xml
     assert "<skip_first_conv>0</skip_first_conv>" in xml
+    tiny = xml.split('lib="TinyfromANN"', 1)[1].split("</NETWORK>", 1)[0]
+    assert "<reset_period>16</reset_period>" in tiny
     assert 'model="smooth"' in xml
     assert "<n>70</n>" in xml
     assert 'from="GAP"' in xml
@@ -678,6 +680,7 @@ def test_layer_probe_nnc_is_tinyfromann_without_colanet():
     assert "<bias_scale>" not in xml
     assert "<record_presentation_time>10</record_presentation_time>" in xml
     assert "<record_presentation_period>11</record_presentation_period>" in xml
+    assert "<reset_period>11</reset_period>" in xml
     assert probe_presentation_period(10) == 11
 
 

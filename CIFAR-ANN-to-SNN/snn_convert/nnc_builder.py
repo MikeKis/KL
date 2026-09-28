@@ -208,6 +208,7 @@ def build_nnc_xml(
         <weights>{escape(weights_file)}</weights>
         <chartime>{params.chartime}</chartime>
         <pool_chartime>{params.pool_chartime}</pool_chartime>
+        <reset_period>{int(params.ntact_per_image)}</reset_period>
 {skip_xml}{layers_block}      </args>
     </Implementation>
   </NETWORK>

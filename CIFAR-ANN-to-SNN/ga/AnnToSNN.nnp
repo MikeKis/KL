@@ -39,6 +39,7 @@
         <weights>$(WEIGHTS)</weights>
         <chartime>10</chartime>
         <pool_chartime>1</pool_chartime>
+        <reset_period>$(PRESENTATION_PERIOD)</reset_period>
         <layer name="conv2">
           <weight_scale>$(CONV2_WEIGHT_SCALE)</weight_scale>
           <bias_scale>$(CONV2_BIAS_SCALE)</bias_scale>
