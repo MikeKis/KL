@@ -29,14 +29,16 @@ from .arni_gpu import find_arnigpu, run_arnigpu
 from .runtime_paths import coerce_path, copy_arni_plugins, copy_data_files, default_workplace_dir
 from .convolution_file import write_convolution_file
 from .jaccard import meanjaccard
-from .layer_sim import conv_lif_counts, sumpool_trains, trains_to_counts
 from .layerwise_nnc import (
     build_image_nnc,
+    build_layer_probe_nnc,
     build_text_values_nnc,
     parse_colanet_anchor,
+    single_layer_architecture_dict,
     sliced_architecture_dict,
     stack_period_for_slice,
 )
+from .spike_protocol import spike_counts_from_protocol
 from .nelder_mead import nelder_mead_max
 from .nnc_builder import ConversionParams
 from .conversion_formulas import (
@@ -44,7 +46,7 @@ from .conversion_formulas import (
     CONV_WEIGHT_SCALE_START,
     POOL_WEIGHT_START,
 )
-from .rate_code import maps_to_rows, rate_code_counts, rate_code_trains, write_activation_csv
+from .rate_code import maps_to_rows, rate_code_counts, write_activation_csv
 from .saturation import saturation_from_sparsity_ratio
 from .theoretical import TheoreticalArtifacts
 from .uint8_fold import fold_first_conv_to_uint8
@@ -252,66 +254,142 @@ def _layer_spec(graph: AnnGraph, name: str) -> LayerSpec:
     raise ConverterError(f"no layer {name}")
 
 
-def _pool_hw(layer: LayerSpec, in_h: int, in_w: int) -> tuple[int, int]:
-    if layer.type == "AdaptiveAvgPool2d":
-        return in_h, in_h
-    k = layer.kernel_size()
-    s = layer.get_int("stride", k)
-    return k, s
+@dataclass
+class Step1Probe:
+    """One-layer TinyfromANN net whose ``-Pt`` protocol is the step-1 prediction."""
+
+    layer_name: str
+    params: ConversionParams
+    out_dir: Path
+    exp_dir: Path
+    workplace: Path
+    search_id: str
+    arnigpu: Path
+    csv_name: str
+    arch_name: str
+    weights_name: str
+    period: int
+    n_images: int
+    n_neurons: int
+    timeout: float | None
+    _ready: bool = False
+
+    def evaluate(self, x: np.ndarray, n_par: int, target: np.ndarray) -> float:
+        sat = float(x[0])
+        ws = float(x[1]) if n_par > 1 else 1.0
+        bs = float(x[2]) if n_par > 2 else None
+        xml = build_layer_probe_nnc(
+            params=self.params,
+            layer_name=self.layer_name,
+            weight_scale=ws,
+            bias_scale=bs,
+            source=self.csv_name,
+            saturation_level=sat,
+            architecture_file=self.arch_name,
+            weights_file=self.weights_name,
+            period=self.period,
+        )
+        nnc_path = self.out_dir / f"probe_{self.layer_name}.nnc"
+        nnc_path.write_text(xml, encoding="utf-8")
+        if not self._ready:
+            self.exp_dir.mkdir(parents=True, exist_ok=True)
+            self.workplace.mkdir(parents=True, exist_ok=True)
+            _copy_dlls(self.exp_dir)
+            copy_data_files(
+                self.workplace,
+                (
+                    self.out_dir / self.csv_name,
+                    self.out_dir / self.arch_name,
+                    self.out_dir / self.weights_name,
+                ),
+            )
+            self._ready = True
+        staged = self.exp_dir / f"{self.search_id}.nnc"
+        shutil.copy2(nnc_path, staged)
+        spike_path = self.workplace / f"spikes.{self.search_id}.txt"
+        if spike_path.is_file():
+            spike_path.unlink()
+        n_tacts = int(self.n_images) * int(self.period)
+        run_arnigpu(
+            self.arnigpu,
+            self.exp_dir,
+            self.search_id,
+            cwd=self.workplace,
+            extra_args=["-Pt", f"-T{n_tacts}"],
+            timeout=self.timeout,
+            log_dir=self.out_dir,
+        )
+        if not spike_path.is_file():
+            return 0.0
+        try:
+            pred = spike_counts_from_protocol(
+                spike_path,
+                n_images=self.n_images,
+                period=self.period,
+                n_neurons=self.n_neurons,
+            )
+        except (ConverterError, OSError, UnicodeError, ValueError):
+            return 0.0
+        if pred.shape != target.shape:
+            return 0.0
+        return meanjaccard(target, pred)
 
 
-def simulate_new_layer_counts(
+def _make_step1_probe(
     graph: AnnGraph,
     layer_name: str,
+    params: ConversionParams,
     input_nchw: np.ndarray,
+    target: np.ndarray,
     *,
-    saturation: float,
-    weight_scale: float = 1.0,
-    bias_scale: float = 1.0,
-) -> np.ndarray:
-    layer = _layer_spec(graph, layer_name)
+    out_dir: Path,
+    exp_dir: Path,
+    workplace_dir: Path,
+    search_id: str,
+    arnigpu: Path,
+    weights_name: str,
+    timeout: float | None,
+) -> Step1Probe:
     inp = input_step_for_layer(graph, layer_name)
-    trains = rate_code_trains(maps_to_rows(input_nchw), saturation)
-    if layer.type in {"AvgPool2d", "AdaptiveAvgPool2d"}:
-        k, s = _pool_hw(layer, inp.h, inp.w)
-        out = sumpool_trains(trains, inp.h, inp.w, inp.c, k, s, weight_scale=weight_scale)
-        return trains_to_counts(out)
-    if layer.type == "Conv2d":
-        w = graph.weights[f"{layer.name}.weight"]
-        b = graph.weights.get(f"{layer.name}.bias")
-        return conv_lif_counts(
-            trains,
-            inp.h,
-            inp.w,
-            inp.c,
-            w,
-            b,
-            weight_scale=weight_scale,
-            bias_scale=bias_scale,
-        )
-    raise ConverterError(f"cannot simulate {layer.type}")
+    tail = sliced_architecture_dict(graph, layer_name, inp.c, inp.h, inp.w)
+    period = stack_period_for_slice(_slice_layers(tail), skip_first_conv=False)
+    arch = single_layer_architecture_dict(graph, layer_name, inp.c, inp.h, inp.w)
+    arch_name = f"probe_{layer_name}_architecture.json"
+    csv_name = f"probe_{layer_name}_input.csv"
+    (out_dir / arch_name).write_text(json.dumps(arch, indent=2), encoding="utf-8")
+    write_activation_csv(out_dir / csv_name, maps_to_rows(input_nchw))
+    return Step1Probe(
+        layer_name=layer_name,
+        params=params,
+        out_dir=out_dir,
+        exp_dir=exp_dir,
+        workplace=workplace_dir,
+        search_id=search_id,
+        arnigpu=arnigpu,
+        csv_name=csv_name,
+        arch_name=arch_name,
+        weights_name=weights_name,
+        period=period,
+        n_images=int(input_nchw.shape[0]),
+        n_neurons=int(target.shape[1]),
+        timeout=timeout,
+    )
 
 
 def _jaccard_objective(
-    graph: AnnGraph,
     layer_name: str,
-    input_nchw: np.ndarray,
     target: np.ndarray,
     x: np.ndarray,
     n_par: int,
+    probe: Step1Probe | None,
 ) -> float:
-    sat = float(x[0])
-    ws = float(x[1]) if n_par > 1 else 1.0
-    bs = float(x[2]) if n_par > 2 else 1.0
+    if probe is None:
+        return 0.0
     try:
-        pred = simulate_new_layer_counts(
-            graph, layer_name, input_nchw, saturation=sat, weight_scale=ws, bias_scale=bs
-        )
-    except Exception:
+        return float(probe.evaluate(x, n_par, target))
+    except Exception as exc:
+        print(f"layerwise {layer_name}: step1 ArNIGPU failed ({exc})")
         return 0.0
-    if pred.shape != target.shape:
-        return 0.0
-    return meanjaccard(target, pred)
 
 
 def _step1_start(values: np.ndarray, n_par: int) -> tuple[np.ndarray, dict]:
@@ -761,6 +839,11 @@ def convert_layerwise(
             maps = LayerActivationStore(act_dir, split_idx, graph=graph, x_nchw_u8=x_nchw)
             print(f"layerwise maps: {act_dir} ({len(split_idx)} images, jaccard first {n_j})")
 
+    step1_exe = None
+    if do_arnigpu and exp_dir is not None:
+        step1_exe = find_arnigpu(arnigpu)
+        if step1_exe is None:
+            print("layerwise step1: ArNIGPU not found, Jaccard fitness is 0")
     last_input_step_name: str | None = None
     for stage_i, layer_name in enumerate(stages):
         layer = _layer_spec(graph, layer_name)
@@ -803,14 +886,35 @@ def convert_layerwise(
         else:
             target = rate_code_counts(maps_to_rows(target_maps[:n_j]), current_sat)
             input_j = input_nchw[:n_j]
+            probe = None
+            if step1_exe is not None and workplace_dir is not None:
+                probe = _make_step1_probe(
+                    graph,
+                    layer_name,
+                    params,
+                    input_j,
+                    target,
+                    out_dir=out_dir,
+                    exp_dir=exp_dir,
+                    workplace_dir=workplace_dir,
+                    search_id=str(cfg.search_id),
+                    arnigpu=step1_exe,
+                    weights_name=last_weights.name,
+                    timeout=cfg.trial_timeout,
+                )
+                print(
+                    f"layerwise {layer_name}: step1 ArNIGPU -Pt id={cfg.search_id} "
+                    f"images={probe.n_images} period={probe.period}"
+                )
 
-            def fn(vec, _ln=layer_name, _in=input_j, _tg=target, _np=n_par):
-                return _jaccard_objective(graph, _ln, _in, _tg, vec, _np)
+            def fn(vec, _ln=layer_name, _tg=target, _np=n_par, _probe=probe):
+                return _jaccard_objective(_ln, _tg, vec, _np, _probe)
 
             x0, sat_info = _step1_start(input_j, n_par)
             best_x, best_j, meta = _nm_from_start(
                 fn, x0, n_par, nm_iter=cfg.nm_iter, sat_info=sat_info
             )
+            meta["simulator"] = "arnigpu" if probe is not None else "skipped"
             sat = float(best_x[0])
             ws = float(best_x[1]) if n_par > 1 else None
             bs = float(best_x[2]) if n_par > 2 else None

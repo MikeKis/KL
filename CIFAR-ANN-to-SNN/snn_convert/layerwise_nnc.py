@@ -168,6 +168,24 @@ def write_sliced_architecture(
     return spec
 
 
+def single_layer_architecture_dict(
+    graph: AnnGraph, layer_name: str, in_c: int, in_h: int, in_w: int
+) -> dict:
+    """Architecture of one layer, for the step-1 ArNIGPU probe (no tail)."""
+    item = None
+    for layer in graph.spec["layers"]:
+        if layer.get("name") == layer_name:
+            item = layer
+            break
+    if item is None:
+        raise ConverterError(f"cannot build probe architecture at {layer_name}")
+    return {
+        "name": f"{graph.spec.get('name', 'ann')}_{layer_name}_probe",
+        "input": {"shape": [int(in_c), int(in_h), int(in_w)], "layout": "NCHW"},
+        "layers": [item],
+    }
+
+
 def _colanet_block(params: ConversionParams, *, output_section: str, n_classes: int = 10) -> str:
     wta = max(1, int(params.wta_per_class))
     n_l = wta * n_classes
@@ -303,6 +321,61 @@ def build_text_values_nnc(
     </Implementation>
   </NETWORK>
 {_colanet_block(params, output_section=output_section, n_classes=n_classes)}"""
+
+
+def build_layer_probe_nnc(
+    *,
+    params: ConversionParams,
+    layer_name: str,
+    weight_scale: float,
+    bias_scale: float | None,
+    source: str,
+    saturation_level: float,
+    architecture_file: str,
+    weights_file: str,
+    period: int,
+    tpres: int | None = None,
+    output_section: str = "GAP",
+) -> str:
+    """fromFile text_values + one TinyfromANN layer. No CoLaNET, no readout.
+
+    Step 1 records this net with ArNIGPU ``-Pt``. Neuron columns are that layer only.
+    """
+    body = f"          <weight_scale>{float(weight_scale):.8g}</weight_scale>\n"
+    if bias_scale is not None:
+        body += f"          <bias_scale>{float(bias_scale):.8g}</bias_scale>\n"
+    layers_block = f'\n        <layer name="{escape(layer_name)}">\n{body}        </layer>\n'
+    presentation = int(tpres if tpres is not None else params.tpres)
+    model = params.snn_model if params.snn_model in {"smooth", "linearized"} else "smooth"
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<SNN model="{escape(model)}">
+  <RECEPTORS name="R">
+    <Implementation lib="fromFile">
+      <args type="text_values">
+        <source>{escape(source)}</source>
+        <Special>
+          <saturation_level absolute="yes">{float(saturation_level):.8g}</saturation_level>
+          <record_presentation_time>{presentation}</record_presentation_time>
+          <record_presentation_period>{int(period)}</record_presentation_period>
+        </Special>
+      </args>
+    </Implementation>
+  </RECEPTORS>
+  <NETWORK>
+    <Implementation lib="TinyfromANN">
+      <args>
+        <input>R</input>
+        <output>{escape(output_section)}</output>
+        <architecture>{escape(architecture_file)}</architecture>
+        <weights>{escape(weights_file)}</weights>
+        <chartime>{params.chartime}</chartime>
+        <pool_chartime>{params.pool_chartime}</pool_chartime>
+        <skip_first_conv>0</skip_first_conv>
+{layers_block}      </args>
+    </Implementation>
+  </NETWORK>
+</SNN>
+"""
 
 
 def build_image_nnc(

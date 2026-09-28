@@ -14,11 +14,18 @@ from snn_convert.jaccard import discretize, meanjaccard, meanjaccard_as_code
 from snn_convert.activations import LayerActivationStore, required_precomputed_layers
 from snn_convert.layerwise import (
     LayerwiseConfig,
+    Step1Probe,
     Step2TrialLog,
     convert_layerwise,
     _step2_classify,
 )
-from snn_convert.layerwise_nnc import parse_colanet_anchor, sliced_architecture_dict
+from snn_convert.layerwise_nnc import (
+    build_layer_probe_nnc,
+    parse_colanet_anchor,
+    sliced_architecture_dict,
+)
+from snn_convert.nnc_builder import ConversionParams
+from snn_convert.spike_protocol import spike_counts_from_protocol
 from snn_convert.layer_sim import sumpool_trains, trains_to_counts
 from snn_convert.rate_code import rate_code_counts
 
@@ -459,6 +466,7 @@ def test_layerwise_fresh_reruns_finished_step2(tmp_path: Path, monkeypatch: pyte
         return np.array([1.5, 0.5], dtype=np.float64), 12.0, {}
 
     monkeypatch.setattr("snn_convert.layerwise._step2_classify", fake_step2)
+    monkeypatch.setattr("snn_convert.layerwise._jaccard_objective", lambda *a, **k: 0.0)
     convert_layerwise(
         g,
         out,
@@ -637,3 +645,85 @@ def test_cli_layerwise_copy_anchor(tmp_path: Path):
     assert rc == 0
     assert (exp / "912.nnc").is_file()
     assert "smooth" in (exp / "912.nnc").read_text(encoding="utf-8")
+
+
+def test_spike_protocol_sums_presentations(tmp_path: Path):
+    # 2 images, period 2, 3 neurons. Image0: neuron0 fires both tacts; image1: neuron2 once.
+    text = "@..\n@..\n..@\n...\n"
+    path = tmp_path / "spikes.913.txt"
+    path.write_text(text, encoding="utf-8", newline="\n")
+    counts = spike_counts_from_protocol(path, n_images=2, period=2, n_neurons=3)
+    assert counts.tolist() == [[2, 0, 0], [0, 0, 1]]
+
+
+def test_layer_probe_nnc_is_tinyfromann_without_colanet():
+    xml = build_layer_probe_nnc(
+        params=ConversionParams(snn_model="smooth", chartime=10, pool_chartime=3),
+        layer_name="gap",
+        weight_scale=3.0,
+        bias_scale=None,
+        source="probe_gap_input.csv",
+        saturation_level=1.5,
+        architecture_file="probe_gap_architecture.json",
+        weights_file="weights_dump.txt",
+        period=16,
+    )
+    assert 'lib="TinyfromANN"' in xml
+    assert "<skip_first_conv>0</skip_first_conv>" in xml
+    assert 'name="gap"' in xml
+    assert "<weight_scale>3</weight_scale>" in xml
+    assert "CoLaNET" not in xml
+    assert "ObjectClassifier" not in xml
+    assert "<bias_scale>" not in xml
+
+
+def test_step1_probe_reads_pt_protocol(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    out = tmp_path / "out"
+    exp = tmp_path / "exp"
+    wp = tmp_path / "wp"
+    out.mkdir()
+    exp.mkdir()
+    wp.mkdir()
+    (out / "probe_gap_input.csv").write_text("0\n", encoding="utf-8")
+    (out / "probe_gap_architecture.json").write_text("{}", encoding="utf-8")
+    (out / "weights_dump.txt").write_text("", encoding="utf-8")
+    seen: dict = {}
+
+    def fake_run(exe, nnc_dir, experiment_id, **kwargs):
+        seen["extra"] = list(kwargs.get("extra_args") or [])
+        seen["cwd"] = kwargs.get("cwd")
+        n_tacts = 2 * 4
+        lines = []
+        for tact in range(n_tacts):
+            lines.append("@." if tact % 4 in (0, 1) else "..")
+        (Path(kwargs["cwd"]) / f"spikes.{experiment_id}.txt").write_text(
+            "\n".join(lines) + "\n", encoding="utf-8"
+        )
+        return None
+
+    monkeypatch.setattr("snn_convert.layerwise.run_arnigpu", fake_run)
+    monkeypatch.setattr("snn_convert.layerwise._copy_dlls", lambda *a, **k: None)
+    monkeypatch.setattr("snn_convert.layerwise.copy_data_files", lambda *a, **k: None)
+    probe = Step1Probe(
+        layer_name="gap",
+        params=ConversionParams(snn_model="smooth"),
+        out_dir=out,
+        exp_dir=exp,
+        workplace=wp,
+        search_id="913",
+        arnigpu=tmp_path / "ArNIGPU.exe",
+        csv_name="probe_gap_input.csv",
+        arch_name="probe_gap_architecture.json",
+        weights_name="weights_dump.txt",
+        period=4,
+        n_images=2,
+        n_neurons=2,
+        timeout=None,
+    )
+    target = np.array([[2, 0], [2, 0]], dtype=np.int32)
+    score = probe.evaluate(np.array([1.0, 3.0]), 2, target)
+    assert seen["extra"] == ["-Pt", "-T8"]
+    assert score == 1.0
+    xml = (out / "probe_gap.nnc").read_text(encoding="utf-8")
+    assert 'lib="TinyfromANN"' in xml
+    assert (exp / "913.nnc").is_file()
