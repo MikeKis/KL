@@ -16,10 +16,10 @@ def test_scaled_synapse_weight_rounds():
     assert scaled_synapse_weight(-0.0016, synapse_scale=1000) == -2
 
 
-def test_pool_synapse_is_just_above_threshold():
-    assert pool_synapse_millivals() == 8532
-    assert pool_synapse_millivals(1.0) == 8532
-    assert pool_synapse_millivals(0.5) == 4266
+def test_pool_synapse_stays_at_or_below_threshold():
+    assert pool_synapse_millivals() == 3000  # start weight 3
+    assert pool_synapse_millivals(1.0) == 1000
+    assert pool_synapse_millivals(9.0) == 8531  # clamped to THRESHOLD_BASE
     assert pool_synapse_millivals(0.0) == 1
 
 

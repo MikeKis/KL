@@ -39,7 +39,13 @@ from .layerwise_nnc import (
 )
 from .nelder_mead import nelder_mead_max
 from .nnc_builder import ConversionParams
+from .conversion_formulas import (
+    BIAS_SCALE_START,
+    CONV_WEIGHT_SCALE_START,
+    POOL_WEIGHT_START,
+)
 from .rate_code import maps_to_rows, rate_code_counts, rate_code_trains, write_activation_csv
+from .saturation import saturation_from_sparsity_ratio
 from .theoretical import TheoreticalArtifacts
 from .uint8_fold import fold_first_conv_to_uint8
 
@@ -60,25 +66,6 @@ class LayerwiseConfig:
     trial_timeout: float | None = None  # None = no ArNIGPU timeout on step 2
     search_id: str = "913"
     fresh: bool = False  # ignore layerwise_log / stage_*.nnc / step2_*.jsonl and rebuild
-
-
-def _sat_grid(values: np.ndarray) -> list[float]:
-    flat = np.asarray(values, dtype=np.float64).reshape(-1)
-    pos = flat[np.isfinite(flat) & (flat > 0)]
-    if pos.size == 0:
-        return [1.0]
-    qs = (50, 70, 80, 90, 95, 99, 99.9)
-    grid = [float(np.percentile(pos, q)) for q in qs]
-    mx = float(pos.max())
-    grid.extend([mx, 1.5 * mx, 2.0 * mx, max(mx * 0.25, 1e-4)])
-    out = sorted({max(g, 1e-4) for g in grid})
-    return out
-
-
-_WEIGHT_GRID = (1.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0)
-_BIAS_GRID = (0.25, 0.5, 1.0, 2.0, 4.0)
-# Pool synapse = weight_scale * (THRESHOLD_BASE+1); 1.0 = legacy relay.
-_POOL_WEIGHT_GRID = (0.05, 0.1, 0.125, 0.2, 0.25, 0.5, 0.75, 1.0)
 
 
 def _step2_param_names(n_par: int) -> list[str]:
@@ -327,60 +314,48 @@ def _jaccard_objective(
     return meanjaccard(target, pred)
 
 
-def _coarse_then_nm(
+def _step1_start(values: np.ndarray, n_par: int) -> tuple[np.ndarray, dict]:
+    """One Nelder–Mead start: sparsity-ratio saturation, fixed pool/conv/bias seeds."""
+    sat, info = saturation_from_sparsity_ratio(values)
+    if n_par <= 1:
+        x0 = np.array([sat], dtype=np.float64)
+    elif n_par == 2:
+        x0 = np.array([sat, POOL_WEIGHT_START], dtype=np.float64)
+    else:
+        x0 = np.array([sat, CONV_WEIGHT_SCALE_START, BIAS_SCALE_START], dtype=np.float64)
+    return x0, info
+
+
+def _nm_bounds(x0: np.ndarray, n_par: int) -> list[tuple[float, float]]:
+    sat = float(x0[0])
+    sat_lo = max(sat * 0.05, 1e-6)
+    sat_hi = max(sat * 20.0, sat_lo * 2.0)
+    if n_par <= 1:
+        return [(sat_lo, sat_hi)]
+    if n_par == 2:
+        # ArNI weight units; upper end is the threshold (8531 millivals / 1000).
+        return [(sat_lo, sat_hi), (0.05, 8.531)]
+    return [(sat_lo, sat_hi), (0.25, 256.0), (0.01, 16.0)]
+
+
+def _nm_from_start(
     fn,
+    x0: np.ndarray,
     n_par: int,
-    sat_candidates: list[float],
     *,
     nm_iter: int,
+    sat_info: dict | None = None,
 ) -> tuple[np.ndarray, float, dict]:
-    best_x = None
-    best_f = -1.0
-    n_coarse = 0
-    if n_par == 1:
-        for sat in sat_candidates:
-            n_coarse += 1
-            x = np.array([sat], dtype=np.float64)
-            f = fn(x)
-            if f > best_f:
-                best_f, best_x = f, x
-    elif n_par == 2:
-        for sat in sat_candidates:
-            for ws in _POOL_WEIGHT_GRID:
-                n_coarse += 1
-                x = np.array([sat, ws], dtype=np.float64)
-                f = fn(x)
-                if f > best_f:
-                    best_f, best_x = f, x
-    else:
-        for sat in sat_candidates:
-            for ws in _WEIGHT_GRID:
-                for bs in _BIAS_GRID:
-                    n_coarse += 1
-                    x = np.array([sat, ws, bs], dtype=np.float64)
-                    f = fn(x)
-                    if f > best_f:
-                        best_f, best_x = f, x
-    if best_x is None:
-        if n_par == 1:
-            best_x = np.array([sat_candidates[0]], dtype=np.float64)
-        elif n_par == 2:
-            best_x = np.array([sat_candidates[0], 1.0], dtype=np.float64)
-        else:
-            best_x = np.array([sat_candidates[0], 1.0, 1.0], dtype=np.float64)
-        best_f = fn(best_x)
-    sat_lo = max(min(sat_candidates) * 0.25, 1e-4)
-    sat_hi = max(sat_candidates) * 2.0
-    if n_par == 1:
-        bounds = [(sat_lo, sat_hi)]
-    elif n_par == 2:
-        bounds = [(sat_lo, sat_hi), (0.01, 1.5)]
-    else:
-        bounds = [(sat_lo, sat_hi), (0.25, 256.0), (0.05, 16.0)]
-    x_nm, f_nm, n_nm = nelder_mead_max(fn, best_x, bounds, max_iter=nm_iter, step=0.2)
-    if f_nm >= best_f:
-        best_x, best_f = x_nm, f_nm
-    return best_x, float(best_f), {"n_coarse": n_coarse, "n_nm": n_nm, "coarse_best": float(best_f)}
+    bounds = _nm_bounds(x0, n_par)
+    x_nm, f_nm, n_nm = nelder_mead_max(fn, x0, bounds, max_iter=nm_iter, step=0.2)
+    meta = {
+        "n_coarse": 0,
+        "n_nm": n_nm,
+        "start": [float(v) for v in np.asarray(x0, dtype=np.float64).ravel()],
+    }
+    if sat_info:
+        meta["saturation_start"] = sat_info
+    return x_nm, float(f_nm), meta
 
 
 def _copy_dlls(exp_dir: Path) -> None:
@@ -832,10 +807,10 @@ def convert_layerwise(
             def fn(vec, _ln=layer_name, _in=input_j, _tg=target, _np=n_par):
                 return _jaccard_objective(graph, _ln, _in, _tg, vec, _np)
 
-            sat_cands = _sat_grid(input_j)
-            if current_sat > 0:
-                sat_cands = sorted(set(sat_cands + [current_sat]))
-            best_x, best_j, meta = _coarse_then_nm(fn, n_par, sat_cands, nm_iter=cfg.nm_iter)
+            x0, sat_info = _step1_start(input_j, n_par)
+            best_x, best_j, meta = _nm_from_start(
+                fn, x0, n_par, nm_iter=cfg.nm_iter, sat_info=sat_info
+            )
             sat = float(best_x[0])
             ws = float(best_x[1]) if n_par > 1 else None
             bs = float(best_x[2]) if n_par > 2 else None
@@ -1097,9 +1072,10 @@ def _finalize_digital_fromfile(
             pred = rate_code_counts(digital_rows, sat)
             return meanjaccard(target, pred)
 
-        sat_cands = _sat_grid(digital)
-        sat_cands = sorted(set(sat_cands + [current_sat]))
-        best_x, best_j, meta = _coarse_then_nm(fn, 1, sat_cands, nm_iter=cfg.nm_iter)
+        x0, sat_info = _step1_start(digital, 1)
+        best_x, best_j, meta = _nm_from_start(
+            fn, x0, 1, nm_iter=cfg.nm_iter, sat_info=sat_info
+        )
         s = float(best_x[0])
     params = replace(params, layer_scales=dict(frozen_scales), skip_first_conv=True, s=s)
     _write_image_nnc(
@@ -1252,9 +1228,9 @@ def _step2_classify(
     if n_par == 1:
         bounds = [sat_bounds]
     elif n_par == 2:
-        bounds = [sat_bounds, (0.01, 1.5)]
+        bounds = [sat_bounds, (0.05, 8.531)]
     else:
-        bounds = [sat_bounds, (0.25, 256.0), (0.05, 16.0)]
+        bounds = [sat_bounds, (0.25, 256.0), (0.01, 16.0)]
     names = _step2_param_names(n_par)
     trial_log = Step2TrialLog(
         log_path,

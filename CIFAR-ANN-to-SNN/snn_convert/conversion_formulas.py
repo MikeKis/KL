@@ -14,6 +14,11 @@ DEFAULT_WEIGHT_SCALE = 1.0
 DEFAULT_BIAS_SCALE = 1.0
 DEFAULT_LAMBDA_PERCENTILE = 99.9
 
+# Step-1 Nelder–Mead starts (no grid). Change these in one place.
+POOL_WEIGHT_START = 3.0  # pool synapse, ArNI weight units (×1000 millivals); kept ≤ threshold
+CONV_WEIGHT_SCALE_START = 30.0
+BIAS_SCALE_START = 0.3
+
 
 def scaled_synapse_weight(
     w_ann: float,
@@ -60,13 +65,13 @@ def data_norm_bias_scale(lambda_out: float) -> float:
     return 1.0 / float(lambda_out)
 
 
-def pool_synapse_millivals(weight_scale: float = 1.0) -> int:
+def pool_synapse_millivals(weight: float = POOL_WEIGHT_START) -> int:
     """
-    AvgPool ≡ SumPool synapse weight.
-    weight_scale=1 → THRESHOLD_BASE+1 (legacy one-spike-fires relay);
-    smaller scales need more coincident inputs to fire.
+    Pool synapse in millivals: ArNI weight × 1000, clamped to [1, THRESHOLD_BASE].
+    Default weight 3 → 3000, below the threshold (8531), so one input spike does not fire.
     """
-    return max(1, int(round(float(weight_scale) * (ARNI_THRESHOLD_BASE + 1.0))))
+    raw = int(round(float(weight) * ARNI_SYNAPSE_SCALE))
+    return int(min(max(raw, 1), int(ARNI_THRESHOLD_BASE)))
 
 
 def bias_to_lif_property(

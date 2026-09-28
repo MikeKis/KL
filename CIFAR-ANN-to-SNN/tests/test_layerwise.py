@@ -130,12 +130,13 @@ def test_rate_code_half_and_clip():
 
 
 def test_sumpool_decrement_recovers_same_tact_except_last():
-    # 2x2, 1 channel, kernel 2 → 1 output. chartime>1024 → no NeuLIF leak.
+    # Synapse above threshold isolates the leftover-charge rule from the default weight.
+    relay = 8532.0
     trains = np.zeros((1, 10, 4), dtype=bool)
     trains[0, 0, 0] = True
     trains[0, 0, 1] = True  # two inputs on tact 0 → leftover fires on tact 1
     trains[0, 3, 2] = True
-    out = sumpool_trains(trains, 2, 2, 1, 2, 2, chartime=2048)
+    out = sumpool_trains(trains, 2, 2, 1, 2, 2, chartime=2048, synapse_weight=relay)
     counts = trains_to_counts(out)
     assert counts.shape == (1, 1)
     assert int(counts[0, 0]) == 3
@@ -143,17 +144,19 @@ def test_sumpool_decrement_recovers_same_tact_except_last():
     late = np.zeros((1, 10, 4), dtype=bool)
     late[0, 9, 0] = True
     late[0, 9, 1] = True  # two inputs on the last tact: one spike, leftover lost
-    late_counts = trains_to_counts(sumpool_trains(late, 2, 2, 1, 2, 2, chartime=2048))
+    late_counts = trains_to_counts(sumpool_trains(late, 2, 2, 1, 2, 2, chartime=2048, synapse_weight=relay))
     assert int(late_counts[0, 0]) == 1
 
 
-def test_sumpool_smaller_weight_needs_more_inputs():
+def test_sumpool_start_weight_needs_several_inputs():
     trains = np.zeros((1, 4, 4), dtype=bool)
     trains[0, 0, 0] = True
-    full = trains_to_counts(sumpool_trains(trains, 2, 2, 1, 2, 2, weight_scale=1.0))
-    weak = trains_to_counts(sumpool_trains(trains, 2, 2, 1, 2, 2, weight_scale=0.2))
-    assert int(full[0, 0]) == 1
-    assert int(weak[0, 0]) == 0
+    trains[0, 0, 1] = True
+    trains[0, 0, 2] = True  # three spikes, one tact
+    strong = trains_to_counts(sumpool_trains(trains, 2, 2, 1, 2, 2, weight_scale=3.0, chartime=2048))
+    weak = trains_to_counts(sumpool_trains(trains, 2, 2, 1, 2, 2, weight_scale=1.0, chartime=2048))
+    assert int(strong[0, 0]) == 1  # 3 * 3000 > 8531
+    assert int(weak[0, 0]) == 0  # 3 * 1000 < 8531
 
 
 def test_layerwise_step2_has_no_timeout_by_default():
@@ -515,13 +518,13 @@ def test_layerwise_resumes_after_partial_stack(tmp_path: Path, monkeypatch: pyte
     j_gap = log1["stages"][0]["step1_meanjaccard"]
     nnc_gap = (out / "stage_gap.nnc").read_text(encoding="utf-8")
     calls: list[int] = []
-    orig = lw._coarse_then_nm
+    orig = lw._nm_from_start
 
     def spy(*args, **kwargs):
         calls.append(1)
         return orig(*args, **kwargs)
 
-    monkeypatch.setattr(lw, "_coarse_then_nm", spy)
+    monkeypatch.setattr(lw, "_nm_from_start", spy)
     cfg2 = LayerwiseConfig(n_train=6, n_jaccard=8, max_stages=None, nm_iter=2, do_step2=False)
     _, log2 = convert_layerwise(
         g,
