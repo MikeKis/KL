@@ -249,6 +249,30 @@ def test_step2_trial_log_writes_evals_and_reloads(tmp_path: Path):
     assert resumed.cached_accuracy([2.5]) == 41.2
 
 
+def test_step2_stops_when_arnigpu_codes_differ_by_less_than_10():
+    from snn_convert.layerwise import STEP2_ACCURACY_FTOL, STEP2_NM_ITER
+    from snn_convert.nelder_mead import nelder_mead_max
+
+    assert STEP2_NM_ITER == 100
+    # 9 exit-code counts = 0.09%; 10 counts = 0.10%. Stop only below 10.
+    assert 0.09 <= STEP2_ACCURACY_FTOL < 0.1
+
+    def run(second: float) -> int:
+        calls = {"n": 0}
+
+        def fn(_x):
+            calls["n"] += 1
+            return 80.0 if calls["n"] == 1 else second
+
+        _x, _f, n_eval = nelder_mead_max(
+            fn, [1.5], [(1.0, 2.0)], max_iter=100, step=0.15, ftol=STEP2_ACCURACY_FTOL
+        )
+        return n_eval
+
+    assert run(80.09) == 2
+    assert run(80.10) > 2
+
+
 def test_step2_classify_logs_each_arnigpu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from snn_convert.arni_gpu import ArniGpuResult
 

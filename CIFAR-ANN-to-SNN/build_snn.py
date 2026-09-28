@@ -93,7 +93,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--layerwise-nm-iter",
         type=int,
         default=100,
-        help="Nelder-Mead iteration cap on step 1 (step 2 keeps the previous shorter budget)",
+        help="Nelder-Mead iteration cap on step 1 (default 100). Step 2 is capped at 100 separately",
     )
     p.add_argument("--layerwise-search-id", default="913", help="experiment id for inner ArNIGPU evals")
     p.add_argument("--layerwise-fresh", action="store_true", help="rebuild all layers; ignore stage_*.nnc and step2_*.jsonl checkpoints")

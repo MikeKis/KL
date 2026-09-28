@@ -63,7 +63,7 @@ class LayerwiseConfig:
     n_train: int = CIFAR_N_TRAIN  # step 2 CoLaNET learning; tests may shrink with frames_hwc
     n_jaccard: int = 800  # step 1: first n images in CIFAR file order (no shuffle)
     max_stages: int | None = None
-    nm_iter: int = 100  # step 1; step 2 stays at the old half-of-25 budget
+    nm_iter: int = 100  # step 1; step 2 uses STEP2_NM_ITER
     seed: int = 42
     do_step2: bool = True
     trial_timeout: float | None = None  # None = no ArNIGPU timeout on step 2
@@ -244,9 +244,11 @@ class Step2TrialLog:
         self.best_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _step2_nm_iter(step1_iter: int) -> int:
-    """Step 2 keeps the budget it had when step 1 was capped at 25 iterations."""
-    return max(8, min(int(step1_iter), 25) // 2)
+STEP2_NM_ITER = 100
+# Fitness is accuracy in percent (ArNIGPU exit code / 100). Stop when those codes
+# on the simplex differ by less than 10, i.e. the accuracy spread is under 0.1%.
+# The check is `spread <= ftol`; 0.095 stops a gap of 9 codes and keeps a gap of 10 running.
+STEP2_ACCURACY_FTOL = 0.095
 
 
 class Step1TrialLog:
@@ -1229,7 +1231,7 @@ def convert_layerwise(
                     search_id=cfg.search_id,
                     arnigpu=arnigpu,
                     timeout=cfg.trial_timeout,
-                    nm_iter=_step2_nm_iter(cfg.nm_iter),
+                    nm_iter=STEP2_NM_ITER,
                     stage_files=(
                         last_nnc,
                         last_arch,
@@ -1493,7 +1495,7 @@ def _finalize_digital_fromfile(
                 search_id=cfg.search_id,
                 arnigpu=arnigpu,
                 timeout=cfg.trial_timeout,
-                nm_iter=_step2_nm_iter(cfg.nm_iter),
+                nm_iter=STEP2_NM_ITER,
                 stage_files=(
                     last_nnc,
                     last_arch,
@@ -1643,7 +1645,9 @@ def _step2_classify(
         )
         return acc
 
-    best_x, best_f, n_eval = nelder_mead_max(fitness, start, bounds, max_iter=nm_iter, step=0.15)
+    best_x, best_f, n_eval = nelder_mead_max(
+        fitness, start, bounds, max_iter=nm_iter, step=0.15, ftol=STEP2_ACCURACY_FTOL
+    )
     trial_log.record_done(best_x, best_f, extra={"n_nm": n_eval})
     meta["n_eval"] = n_eval
     meta["n_arnigpu"] = trial_log.n_logged
