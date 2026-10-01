@@ -17,6 +17,18 @@ def _from_unit(u: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
     return lo * (hi / lo) ** u
 
 
+def _simplex_collapsed(
+    simplex: list[np.ndarray], lo: np.ndarray, hi: np.ndarray, xtol: float
+) -> bool:
+    """True when every parameter's vertex spread is < xtol times that coordinate's mean."""
+    if xtol <= 0:
+        return False
+    xs = np.vstack([_from_unit(u, lo, hi) for u in simplex])
+    mean = xs.mean(axis=0)
+    spread = xs.max(axis=0) - xs.min(axis=0)
+    return bool(np.all(spread < float(xtol) * mean))
+
+
 def nelder_mead_max(
     fn: Callable[[np.ndarray], float],
     x0: Sequence[float],
@@ -25,9 +37,14 @@ def nelder_mead_max(
     max_iter: int = 40,
     step: float = 0.25,
     ftol: float = 1e-4,
+    xtol: float = 0.001,
 ) -> tuple[np.ndarray, float, int]:
     """
     Maximize fn(x) with x in (lo, hi] via Nelder–Mead on a log-unit box.
+
+    Stops when the score spread is <= ftol, or when for every coordinate the
+    spread of simplex vertices is < xtol times the mean of that coordinate
+    (measured in the original parameters, not the log-unit box).
 
     Returns (best_x, best_f, n_eval).
     """
@@ -60,6 +77,8 @@ def nelder_mead_max(
         simplex = [simplex[i] for i in order]
         scores = [scores[i] for i in order]
         if max(scores) - min(scores) <= ftol:
+            break
+        if _simplex_collapsed(simplex, lo, hi, xtol):
             break
         best, worst = simplex[0], simplex[-1]
         centroid = np.mean(simplex[:-1], axis=0)

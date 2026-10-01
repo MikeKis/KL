@@ -249,6 +249,23 @@ def test_step2_trial_log_writes_evals_and_reloads(tmp_path: Path):
     assert resumed.cached_accuracy([2.5]) == 41.2
 
 
+def test_nelder_mead_stops_when_simplex_spread_is_below_0_001_of_mean():
+    from snn_convert.nelder_mead import nelder_mead_max
+
+    def fn(x):
+        # Scores stay apart, so the accuracy tolerance cannot be what stops the run.
+        return 80.0 + float(x[0])
+
+    _x, _f, n_tight = nelder_mead_max(
+        fn, [1.5], [(1.0, 2.0)], max_iter=100, step=1e-8, ftol=-1.0, xtol=0.001
+    )
+    _x, _f, n_wide = nelder_mead_max(
+        fn, [1.5], [(1.0, 2.0)], max_iter=5, step=0.15, ftol=-1.0, xtol=0.001
+    )
+    assert n_tight == 2
+    assert n_wide > 2
+
+
 def test_step2_stops_when_arnigpu_codes_differ_by_less_than_10():
     from snn_convert.layerwise import STEP2_ACCURACY_FTOL, STEP2_NM_ITER
     from snn_convert.nelder_mead import nelder_mead_max
