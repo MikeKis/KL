@@ -249,6 +249,108 @@ def test_step2_trial_log_writes_evals_and_reloads(tmp_path: Path):
     assert resumed.cached_accuracy([2.5]) == 41.2
 
 
+def test_rescue_packs_saturation_and_every_converted_layer():
+    from snn_convert.layerwise import (
+        CONV_BIAS_BOUNDS,
+        CONV_WEIGHT_BOUNDS,
+        POOL_WEIGHT_BOUNDS,
+        _rescue_bounds,
+        _rescue_layout,
+        _rescue_param_names,
+        _rescue_unpack,
+        _rescue_vector,
+    )
+
+    frozen = {
+        "gap": {"weight_scale": 3.0},
+        "conv5": {"weight_scale": 30.0, "bias_scale": 0.3},
+    }
+    layout = _rescue_layout(frozen)
+    assert _rescue_param_names(layout) == [
+        "saturation",
+        "gap.weight_scale",
+        "conv5.weight_scale",
+        "conv5.bias_scale",
+    ]
+    assert _rescue_vector(2.5, frozen, layout).tolist() == [2.5, 3.0, 30.0, 0.3]
+    assert _rescue_bounds((1.0, 4.0), frozen, layout) == [
+        (1.0, 4.0),
+        POOL_WEIGHT_BOUNDS,
+        CONV_WEIGHT_BOUNDS,
+        CONV_BIAS_BOUNDS,
+    ]
+    sat, scales = _rescue_unpack([9.0, 1.0, 2.0, 0.5], frozen, layout)
+    assert sat == 9.0
+    assert scales == {
+        "gap": {"weight_scale": 1.0},
+        "conv5": {"weight_scale": 2.0, "bias_scale": 0.5},
+    }
+    assert frozen["gap"]["weight_scale"] == 3.0  # caller's dict untouched
+
+
+def test_rescue_runs_only_below_critical_accuracy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import snn_convert.layerwise as lw
+
+    frozen = {
+        "gap": {"weight_scale": 3.0},
+        "conv5": {"weight_scale": 30.0, "bias_scale": 0.3},
+    }
+    seen: list[list[str]] = []
+
+    def fake_step2(**kwargs):
+        seen.append(list(kwargs["param_names"]))
+        kwargs["fn_write"](np.array([5.0, 1.0, 2.0, 0.5]))
+        return np.array([5.0, 1.0, 2.0, 0.5]), 44.0, {}
+
+    monkeypatch.setattr(lw, "_step2_classify", fake_step2)
+    written: list[tuple[float, dict]] = []
+
+    def common(**over):
+        kwargs = dict(
+            fn_write_scales=lambda s, sc: written.append((s, sc)),
+            sat=2.0,
+            frozen_scales=frozen,
+            step2_acc=40.0,
+            n_step2_par=3,
+            out_dir=tmp_path,
+            exp_dir=tmp_path / "exp",
+            workplace_dir=tmp_path / "wp",
+            search_id="913",
+            arnigpu=tmp_path / "ArNIGPU.exe",
+            timeout=None,
+            stage_files=(tmp_path / "912.nnc",),
+            layer="conv5",
+            fresh=True,
+        )
+        kwargs.update(over)
+        return lw._rescue_converted_layers(**kwargs)
+
+    sat, scales, acc, _meta = common()
+    assert seen == [["saturation", "gap.weight_scale", "conv5.weight_scale", "conv5.bias_scale"]]
+    assert (sat, acc) == (5.0, 44.0)
+    assert scales["gap"]["weight_scale"] == 1.0
+    assert written[-1] == (5.0, scales)
+
+    # A joint space no wider than step 2's is skipped: one converted layer, 3 params.
+    assert common(frozen_scales={"conv5": dict(frozen["conv5"])}, n_step2_par=3) is None
+
+    # No improvement over step 2 keeps the old point and rewrites the .nnc with it.
+    sat_keep, scales_keep, _acc, meta_keep = common(step2_acc=90.0)
+    assert sat_keep == 2.0
+    assert scales_keep == frozen
+    assert meta_keep["kept_step2"] is True
+    assert written[-1] == (2.0, frozen)
+
+
+def test_below_critical_accuracy_threshold():
+    from snn_convert.layerwise import _below_critical
+
+    assert _below_critical(LayerwiseConfig(critical_accuracy_pct=40.0), 39.9)
+    assert not _below_critical(LayerwiseConfig(critical_accuracy_pct=40.0), 40.0)
+    assert not _below_critical(LayerwiseConfig(), 1.0)  # no threshold configured
+    assert not _below_critical(LayerwiseConfig(critical_accuracy_pct=40.0), None)
+
+
 def test_nelder_mead_stops_when_simplex_spread_is_below_0_001_of_mean():
     from snn_convert.nelder_mead import nelder_mead_max
 
@@ -267,10 +369,9 @@ def test_nelder_mead_stops_when_simplex_spread_is_below_0_001_of_mean():
 
 
 def test_step2_stops_when_arnigpu_codes_differ_by_less_than_10():
-    from snn_convert.layerwise import STEP2_ACCURACY_FTOL, STEP2_NM_ITER
+    from snn_convert.layerwise import STEP2_ACCURACY_FTOL
     from snn_convert.nelder_mead import nelder_mead_max
 
-    assert STEP2_NM_ITER == 100
     # 9 exit-code counts = 0.09%; 10 counts = 0.10%. Stop only below 10.
     assert 0.09 <= STEP2_ACCURACY_FTOL < 0.1
 

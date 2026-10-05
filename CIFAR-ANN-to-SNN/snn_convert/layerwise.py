@@ -69,6 +69,8 @@ class LayerwiseConfig:
     trial_timeout: float | None = None  # None = no ArNIGPU timeout on step 2
     search_id: str = "913"
     fresh: bool = False  # ignore layerwise_log / stage_*.nnc / step2_*.jsonl and rebuild
+    # Step-2 accuracy below this re-tunes every already-converted layer. None = never.
+    critical_accuracy_pct: float | None = None
 
 
 def _step2_param_names(n_par: int) -> list[str]:
@@ -550,16 +552,26 @@ def _step1_start(values: np.ndarray, n_par: int) -> tuple[np.ndarray, dict]:
     return x0, info
 
 
+# ArNI weight units; the pool upper end is the threshold (8531 millivals / 1000).
+POOL_WEIGHT_BOUNDS = (0.05, 8.531)
+CONV_WEIGHT_BOUNDS = (0.25, 256.0)
+CONV_BIAS_BOUNDS = (0.01, 16.0)
+
+
+def _layer_param_bounds(n_par: int) -> list[tuple[float, float]]:
+    """Bounds after the leading saturation, for one layer of n_par parameters."""
+    if int(n_par) <= 1:
+        return []
+    if int(n_par) == 2:
+        return [POOL_WEIGHT_BOUNDS]
+    return [CONV_WEIGHT_BOUNDS, CONV_BIAS_BOUNDS]
+
+
 def _nm_bounds(x0: np.ndarray, n_par: int) -> list[tuple[float, float]]:
     sat = float(x0[0])
     sat_lo = max(sat * 0.05, 1e-6)
     sat_hi = max(sat * 20.0, sat_lo * 2.0)
-    if n_par <= 1:
-        return [(sat_lo, sat_hi)]
-    if n_par == 2:
-        # ArNI weight units; upper end is the threshold (8531 millivals / 1000).
-        return [(sat_lo, sat_hi), (0.05, 8.531)]
-    return [(sat_lo, sat_hi), (0.25, 256.0), (0.01, 16.0)]
+    return [(sat_lo, sat_hi), *_layer_param_bounds(n_par)]
 
 
 def _nm_from_start(
@@ -651,6 +663,8 @@ def _discard_step2_logs(out_dir: Path) -> None:
         *out.glob("step1_*_best.json"),
         *out.glob("step2_*.jsonl"),
         *out.glob("step2_*_best.json"),
+        *out.glob("rescue_*.jsonl"),
+        *out.glob("rescue_*_best.json"),
     ):
         try:
             path.unlink()
@@ -1272,6 +1286,61 @@ def convert_layerwise(
             stage_log["step2_accuracy_pct"] = step2_acc
             stage_log["step2_meta"] = step2_meta
             stage_log["step2_trial_log"] = str(jsonl_path)
+
+            if _below_critical(cfg, step2_acc):
+
+                def _write_scales(sat_r, scales_r, _p=params):
+                    _write_stage_nnc(
+                        graph,
+                        layer_name,
+                        sat_r,
+                        scales_r,
+                        _p,
+                        out_dir,
+                        last_nnc,
+                        last_arch,
+                        last_weights,
+                        target_file,
+                        input_nchw,
+                        slice_in,
+                    )
+
+                rescued = _rescue_converted_layers(
+                    fn_write_scales=_write_scales,
+                    sat=sat,
+                    frozen_scales=frozen_scales,
+                    step2_acc=step2_acc,
+                    n_step2_par=n_par,
+                    out_dir=out_dir,
+                    exp_dir=exp_dir,
+                    workplace_dir=workplace_dir,
+                    search_id=cfg.search_id,
+                    arnigpu=arnigpu,
+                    timeout=cfg.trial_timeout,
+                    stage_files=(
+                        last_nnc,
+                        last_arch,
+                        last_weights,
+                        conv_path,
+                        out_dir / f"{layer_name}_input.csv",
+                    ),
+                    layer=layer_name,
+                    fresh=cfg.fresh,
+                )
+                if rescued is not None:
+                    sat, new_scales, rescue_acc, rescue_meta = rescued
+                    frozen_scales.clear()
+                    frozen_scales.update(new_scales)
+                    params = replace(params, layer_scales=dict(frozen_scales), s=None)
+                    stage_log["rescue_saturation"] = sat
+                    stage_log["rescue_accuracy_pct"] = rescue_acc
+                    stage_log["rescue_scales"] = {k: dict(v) for k, v in frozen_scales.items()}
+                    stage_log["rescue_meta"] = rescue_meta
+                    entry = frozen_scales.get(layer_name) or {}
+                    if n_par > 1:
+                        ws = float(entry.get("weight_scale", ws))
+                    if n_par > 2:
+                        bs = float(entry.get("bias_scale", bs))
         current_sat = sat
         stage_log["complete"] = True
         _upsert_stage(log, stage_log)
@@ -1512,6 +1581,49 @@ def _finalize_digital_fromfile(
         stage_log["step2_accuracy_pct"] = step2_acc
         stage_log["step2_meta"] = step2_meta
         stage_log["step2_trial_log"] = str(jsonl_path)
+
+        if _below_critical(cfg, step2_acc):
+
+            def _write_scales(sat_r, scales_r):
+                p = replace(params, layer_scales=dict(scales_r), s=float(sat_r))
+                _write_image_nnc(
+                    graph,
+                    params=p,
+                    last_nnc=last_nnc,
+                    last_arch=last_arch,
+                    last_weights=last_weights,
+                    conv_path=conv_path,
+                    w_u8=w_u8,
+                    b_u8=b_u8,
+                    image_source=image_source,
+                    target_file=target_file,
+                )
+
+            rescued = _rescue_converted_layers(
+                fn_write_scales=_write_scales,
+                sat=s,
+                frozen_scales=frozen_scales,
+                step2_acc=step2_acc,
+                n_step2_par=1,
+                out_dir=out_dir,
+                exp_dir=exp_dir,
+                workplace_dir=workplace_dir,
+                search_id=cfg.search_id,
+                arnigpu=arnigpu,
+                timeout=cfg.trial_timeout,
+                stage_files=(last_nnc, last_arch, last_weights, conv_path),
+                layer="fromfile",
+                fresh=cfg.fresh,
+            )
+            if rescued is not None:
+                s, new_scales, rescue_acc, rescue_meta = rescued
+                frozen_scales.clear()
+                frozen_scales.update(new_scales)
+                params = replace(params, layer_scales=dict(frozen_scales), s=s)
+                stage_log["rescue_saturation"] = s
+                stage_log["rescue_accuracy_pct"] = rescue_acc
+                stage_log["rescue_scales"] = {k: dict(v) for k, v in frozen_scales.items()}
+                stage_log["rescue_meta"] = rescue_meta
     stage_log["complete"] = True
     _upsert_stage(log, stage_log)
     _commit_progress(
@@ -1550,7 +1662,37 @@ def _rewrite_stage(
         if n_par > 2:
             entry["bias_scale"] = float(vec[2])
         scales[layer_name] = entry
-    p = replace(params, layer_scales=scales, s=None, skip_first_conv=False)
+    _write_stage_nnc(
+        graph,
+        layer_name,
+        sat,
+        scales,
+        params,
+        out_dir,
+        last_nnc,
+        last_arch,
+        last_weights,
+        target_file,
+        input_nchw,
+        slice_in,
+    )
+
+
+def _write_stage_nnc(
+    graph,
+    layer_name,
+    sat: float,
+    scales: dict,
+    params,
+    out_dir,
+    last_nnc,
+    last_arch,
+    last_weights,
+    target_file,
+    input_nchw,
+    slice_in,
+) -> None:
+    p = replace(params, layer_scales=dict(scales), s=None, skip_first_conv=False)
     spec = sliced_architecture_dict(graph, layer_name, slice_in.c, slice_in.h, slice_in.w)
     last_arch.write_text(json.dumps(spec, indent=2), encoding="utf-8")
     p.ntact_per_image = stack_period_for_slice(_slice_layers(spec), skip_first_conv=False)
@@ -1565,6 +1707,142 @@ def _rewrite_stage(
         weights_file=last_weights.name,
     )
     last_nnc.write_text(xml, encoding="utf-8")
+
+
+def _rescue_layout(frozen_scales: dict) -> list[tuple[str, str]]:
+    """(layer, key) pairs that follow the leading saturation, in stack order."""
+    layout: list[tuple[str, str]] = []
+    for name, sc in frozen_scales.items():
+        if "weight_scale" in sc:
+            layout.append((name, "weight_scale"))
+        if "bias_scale" in sc:
+            layout.append((name, "bias_scale"))
+    return layout
+
+
+def _rescue_param_names(layout: list[tuple[str, str]]) -> list[str]:
+    return ["saturation", *(f"{name}.{key}" for name, key in layout)]
+
+
+def _rescue_vector(sat: float, frozen_scales: dict, layout) -> np.ndarray:
+    return np.array(
+        [float(sat), *(float(frozen_scales[name][key]) for name, key in layout)],
+        dtype=np.float64,
+    )
+
+
+def _rescue_bounds(sat_bounds, frozen_scales: dict, layout) -> list[tuple[float, float]]:
+    bounds = [sat_bounds]
+    for name, key in layout:
+        if key == "bias_scale":
+            bounds.append(CONV_BIAS_BOUNDS)
+        else:
+            # Only convs carry a bias_scale; pool / GAP weights are capped at the threshold.
+            bounds.append(
+                CONV_WEIGHT_BOUNDS if "bias_scale" in frozen_scales[name] else POOL_WEIGHT_BOUNDS
+            )
+    return bounds
+
+
+def _rescue_unpack(vec, frozen_scales: dict, layout) -> tuple[float, dict]:
+    arr = np.asarray(vec, dtype=np.float64).ravel()
+    scales = {name: dict(sc) for name, sc in frozen_scales.items()}
+    for i, (name, key) in enumerate(layout, start=1):
+        scales[name][key] = float(arr[i])
+    return float(arr[0]), scales
+
+
+def _vec_from_best_json(path: Path, names: list[str]) -> np.ndarray | None:
+    if not Path(path).is_file():
+        return None
+    try:
+        best = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    params = best.get("params") or {}
+    try:
+        return np.array([float(params[n]) for n in names], dtype=np.float64)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _below_critical(cfg: LayerwiseConfig, accuracy_pct) -> bool:
+    return (
+        cfg.critical_accuracy_pct is not None
+        and accuracy_pct is not None
+        and float(accuracy_pct) < float(cfg.critical_accuracy_pct)
+    )
+
+
+def _rescue_converted_layers(
+    *,
+    fn_write_scales,
+    sat: float,
+    frozen_scales: dict,
+    step2_acc: float | None,
+    n_step2_par: int,
+    out_dir: Path,
+    exp_dir: Path,
+    workplace_dir: Path | None,
+    search_id,
+    arnigpu,
+    timeout: float | None,
+    stage_files,
+    layer: str,
+    fresh: bool,
+) -> tuple[float, dict, float | None, dict] | None:
+    """Re-tune the input saturation and every already-converted layer at once.
+
+    Runs when step 2 fell below the critical accuracy. CoLaNET is not touched.
+    Returns None when the joint space is no larger than what step 2 just searched.
+    """
+    layout = _rescue_layout(frozen_scales)
+    if 1 + len(layout) <= int(n_step2_par):
+        return None
+    names = _rescue_param_names(layout)
+    log_path = Path(out_dir) / f"rescue_{layer}.jsonl"
+    if not fresh and _jsonl_has_done(log_path):
+        done = _vec_from_best_json(Path(out_dir) / f"rescue_{layer}_best.json", names)
+        if done is not None:
+            new_sat, new_scales = _rescue_unpack(done, frozen_scales, layout)
+            fn_write_scales(new_sat, new_scales)
+            print(f"layerwise {layer}: reuse finished rescue")
+            return new_sat, new_scales, None, {"resumed_done": True, "log": str(log_path)}
+
+    print(
+        f"layerwise {layer}: accuracy below critical, re-tuning {len(names)} params "
+        f"over {len(frozen_scales)} converted layers"
+    )
+
+    def write(vec):
+        sat_r, scales_r = _rescue_unpack(vec, frozen_scales, layout)
+        fn_write_scales(sat_r, scales_r)
+
+    best_x, best_acc, meta = _step2_classify(
+        fn_write=write,
+        x0=_rescue_vector(sat, frozen_scales, layout),
+        n_par=len(names),
+        sat_bounds=(max(sat * 0.25, 1e-4), sat * 4.0),
+        bounds=_rescue_bounds((max(sat * 0.25, 1e-4), sat * 4.0), frozen_scales, layout),
+        param_names=names,
+        exp_dir=exp_dir,
+        workplace_dir=workplace_dir,
+        search_id=search_id,
+        arnigpu=arnigpu,
+        timeout=timeout,
+        nm_iter=STEP2_NM_ITER,
+        stage_files=stage_files,
+        layer=f"rescue_{layer}",
+        log_path=log_path,
+    )
+    if best_acc is None or (step2_acc is not None and best_acc < step2_acc):
+        # No gain: restore the .nnc that the search overwrote and keep the step-2 point.
+        fn_write_scales(sat, frozen_scales)
+        meta["kept_step2"] = True
+        return sat, {name: dict(sc) for name, sc in frozen_scales.items()}, best_acc, meta
+    new_sat, new_scales = _rescue_unpack(best_x, frozen_scales, layout)
+    fn_write_scales(new_sat, new_scales)
+    return new_sat, new_scales, best_acc, meta
 
 
 def _step2_classify(
@@ -1582,14 +1860,12 @@ def _step2_classify(
     stage_files,
     layer: str,
     log_path: Path,
+    bounds: list[tuple[float, float]] | None = None,
+    param_names: list[str] | None = None,
 ) -> tuple[np.ndarray, float | None, dict]:
-    if n_par == 1:
-        bounds = [sat_bounds]
-    elif n_par == 2:
-        bounds = [sat_bounds, (0.05, 8.531)]
-    else:
-        bounds = [sat_bounds, (0.25, 256.0), (0.01, 16.0)]
-    names = _step2_param_names(n_par)
+    if bounds is None:
+        bounds = [sat_bounds, *_layer_param_bounds(n_par)]
+    names = param_names if param_names is not None else _step2_param_names(n_par)
     trial_log = Step2TrialLog(
         log_path,
         layer=layer,

@@ -92,8 +92,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument(
         "--layerwise-nm-iter",
         type=int,
-        default=100,
-        help="Nelder-Mead iteration cap on step 1 (default 30). Step 2 is capped at 30 separately",
+        default=30,
+        help="Nelder-Mead iteration cap on step 1. Step 2 is capped at 30 separately",
+    )
+    p.add_argument(
+        "--layerwise-critical-accuracy",
+        type=float,
+        default=None,
+        help="percent; step-2 accuracy below this re-tunes all already-converted layers at once",
     )
     p.add_argument("--layerwise-search-id", default="913", help="experiment id for inner ArNIGPU evals")
     p.add_argument("--layerwise-fresh", action="store_true", help="rebuild all layers; ignore stage_*.nnc and step2_*.jsonl checkpoints")
@@ -274,6 +280,7 @@ def _main_impl(args: argparse.Namespace) -> int:
             trial_timeout=args.timeout,
             search_id=args.layerwise_search_id,
             fresh=bool(args.layerwise_fresh),
+            critical_accuracy_pct=args.layerwise_critical_accuracy,
         )
         image_source = nnc_data_ref(args.images, args.workplace)
         target_file = nnc_data_ref(args.labels, args.workplace)
