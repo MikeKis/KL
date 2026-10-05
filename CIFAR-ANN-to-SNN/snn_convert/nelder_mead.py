@@ -34,10 +34,10 @@ def nelder_mead_max(
     x0: Sequence[float],
     bounds: Sequence[tuple[float, float]],
     *,
-    max_iter: int = 40,
+    max_iter: int = 30,
     step: float = 0.25,
     ftol: float = 1e-4,
-    xtol: float = 0.001,
+    xtol: float = 0.003,
 ) -> tuple[np.ndarray, float, int]:
     """
     Maximize fn(x) with x in (lo, hi] via Nelder–Mead on a log-unit box.

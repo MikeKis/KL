@@ -16,8 +16,8 @@ DEFAULT_LAMBDA_PERCENTILE = 99.9
 
 # Step-1 Nelder–Mead starts (no grid). Change these in one place.
 POOL_WEIGHT_START = 3.0  # pool synapse, ArNI weight units (×1000 millivals); kept ≤ threshold
-CONV_WEIGHT_SCALE_START = 30.0
-BIAS_SCALE_START = 0.3
+CONV_WEIGHT_SCALE_START = 3.0
+BIAS_SCALE_START = 3.0
 
 
 def scaled_synapse_weight(
