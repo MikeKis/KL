@@ -6,7 +6,6 @@ from __future__ import annotations
 
 ARNI_SYNAPSE_SCALE = 1000.0
 ARNI_THRESHOLD_BASE = 8531.0
-STOCH_STIM_FACTOR = 2.0  # uniform stim draw; mean is half of max
 DEFAULT_CHARTIME = 10
 DEFAULT_POOL_CHARTIME = 3  # leak so pool output rate tracks input intensity
 COLANET_BASE_PERIOD = 15  # 10 tacts image + 5 silence when CoLaNET reads receptors
@@ -17,7 +16,7 @@ DEFAULT_LAMBDA_PERCENTILE = 99.9
 # Step-1 Nelder–Mead starts (no grid). Change these in one place.
 POOL_WEIGHT_START = 3.0  # pool synapse, ArNI weight units (×1000 millivals); kept ≤ threshold
 CONV_WEIGHT_SCALE_START = 3.0
-BIAS_SCALE_START = 3.0
+# bias_scale has no start: it is derived from weight_scale, see bias_scale_for_layer.
 
 
 def scaled_synapse_weight(
@@ -58,11 +57,9 @@ def data_norm_weight_scale(
     return (float(lambda_in) / float(lambda_out)) / gain
 
 
-def data_norm_bias_scale(lambda_out: float) -> float:
-    """Map ANN bias into LIF units when activations are divided by λ_out."""
-    if lambda_out <= 0:
-        raise ValueError("λ_out must be positive")
-    return 1.0 / float(lambda_out)
+def data_norm_bias_scale(weight_scale: float, lambda_in: float) -> float:
+    """Data-norm bias scale. Same rule as bias_scale_for_layer: λ_in is that layer's sat_in."""
+    return bias_scale_for_layer(weight_scale, lambda_in)
 
 
 def pool_synapse_millivals(weight: float = POOL_WEIGHT_START) -> int:
@@ -74,21 +71,58 @@ def pool_synapse_millivals(weight: float = POOL_WEIGHT_START) -> int:
     return int(min(max(raw, 1), int(ARNI_THRESHOLD_BASE)))
 
 
+def bias_scale_for_layer(weight_scale: float, sat_in: float) -> float:
+    """
+    The only bias_scale that reproduces the ANN bias; it is derived, never searched.
+
+    Input unit j fires at rate a_j / sat_in per tact and its synapse carries
+    weight_scale * 1000 millivals, so the convolution arrives as
+    (weight_scale * 1000 / sat_in) * Σ w·a millivals per tact. The DLL injects the bias as
+    bias * bias_scale * 1000 millivals per tact, so matching the two gives
+    bias_scale = weight_scale / sat_in.
+
+    Leak-independent: chartime decays the synaptic current and the constant bias alike, so it
+    cancels from the ratio. Getting this ratio wrong moves the ReLU knee of every filter.
+    """
+    if float(sat_in) <= 0.0:
+        raise ValueError("sat_in must be positive")
+    return float(weight_scale) / float(sat_in)
+
+
+def propagate_bias_scales(
+    weight_scales,
+    s: float,
+    synapse_scale: float = ARNI_SYNAPSE_SCALE,
+    tpres: int = DEFAULT_CHARTIME,
+) -> list[float]:
+    """bias_scale of every Conv in a stack fed by a rate code that saturates at s.
+
+    sat_in of the first Conv is s; a Conv outputs a_out / (sat_in / (gain * weight_scale)), so it
+    divides the scale by gain * weight_scale, while plain-average pools leave it alone.
+
+    This is why no single global bias multiplier can be right: rescaling one Conv shifts sat_in of
+    every Conv above it, so the correct bias correction compounds with depth.
+    """
+    gain = lif_rate_gain(synapse_scale, tpres)
+    sat_in = float(s)
+    out: list[float] = []
+    for ws in weight_scales:
+        out.append(bias_scale_for_layer(ws, sat_in))
+        sat_in /= gain * float(ws)
+    return out
+
+
 def bias_to_lif_property(
     bias: float,
     bias_scale: float = DEFAULT_BIAS_SCALE,
-    chartime: int = DEFAULT_CHARTIME,
 ) -> tuple[str, float]:
     """
-    Negative bias → threshold excess; positive → stochastic stimulation.
-    DLL: stim = bias * bias_scale;
-         if stim >= 0: p_StochasticStimulation = stim * 2
-         else: s_ThresholdExcess = -stim * chartime  (chartime of those neurons)
+    Bias of either sign → one constant current, no threshold change.
+    DLL: SetNeuronProperty(neuron, p_ConstantStimulation, bias * bias_scale);
+    ArNI scales the property by 1000, so the neuron gets bias * bias_scale * 1000
+    millivals added to its potential every tact, sign included.
     """
-    stim = float(bias) * float(bias_scale)
-    if stim >= 0.0:
-        return "stochastic_stimulation", stim * STOCH_STIM_FACTOR
-    return "threshold_excess", -stim * float(chartime)
+    return "constant_stimulation", float(bias) * float(bias_scale)
 
 
 def ann_stack_delay(layers, *, skip_first_conv: bool = True) -> int:

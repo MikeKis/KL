@@ -102,8 +102,8 @@ def conv_lif_counts(
     """
     Deterministic LIF: millival synapses, leak as NeuLIF, one spike/tact.
     On fire, potential is decremented by the threshold (not reset to 0).
-    Positive bias → mean stochastic current = bias * bias_scale (S/2 with S=2*stim).
-    Negative bias → ThresholdExcess = |stim| * chartime.
+    Bias of either sign is a constant current of bias * bias_scale * 1000 millivals per tact
+    (ArNI p_ConstantStimulation), added to the same potential as the convolution sum.
     """
     w = np.asarray(weight, dtype=np.float64)
     millival = np.rint(w * float(weight_scale) * float(synapse_scale))
@@ -115,18 +115,14 @@ def conv_lif_counts(
     current = current.reshape(n, tpres, n_f, out_h, out_w)
 
     stim = np.zeros(n_f, dtype=np.float64)
-    excess = np.zeros(n_f, dtype=np.float64)
     if bias is not None:
         b = np.asarray(bias, dtype=np.float64).reshape(-1)
         if b.size != n_f:
             raise ValueError(f"bias {b.size} != filters {n_f}")
-        raw = b * float(bias_scale)
-        pos = raw >= 0.0
-        stim[pos] = raw[pos]  # mean of Uniform[0, 2*stim]
-        excess[~pos] = -raw[~pos] * float(chartime)
+        # ArNI truncates p_ConstantStimulation to an int after scaling by 1000.
+        stim = np.trunc(b * float(bias_scale) * float(synapse_scale))
 
-    thr = float(threshold_base) + excess
-    thr_b = thr.reshape(1, n_f, 1, 1)
+    thr_b = np.full((1, n_f, 1, 1), float(threshold_base))
     stim_b = stim.reshape(1, n_f, 1, 1)
     decay = _decay_shift(chartime)
     potential = np.zeros((n, n_f, out_h, out_w), dtype=np.float64)

@@ -101,8 +101,21 @@ def test_joint_vector_roundtrip_dim():
     assert names == ["conv2", "conv3", "conv4", "conv5"]
     p = ConversionParams(s=6.7, layer_scales={n: {"weight_scale": 1.1, "bias_scale": 0.2} for n in names})
     v = encode_vector(p, names)
-    assert v.size == 1 + 8 + 13
+    assert v.size == 1 + 4 + 13  # bias_scale is derived, not searched
     q = decode_vector(p, names, v)
     assert abs((q.s or 0) - 6.7) < 1e-9
     assert q.snn_model == "linearized"
     assert q.layer_scales["conv5"]["weight_scale"] == p.layer_scales["conv5"]["weight_scale"]
+
+
+def test_decoded_bias_scale_follows_the_weight_scale_chain():
+    from snn_convert.conversion_formulas import bias_scale_for_layer, lif_rate_gain
+    from snn_convert.joint_space import decode_vector, encode_vector
+
+    names = ["conv2", "conv3"]
+    p = ConversionParams(s=4.0, layer_scales={"conv2": {"weight_scale": 2.0}, "conv3": {"weight_scale": 3.0}})
+    q = decode_vector(p, names, encode_vector(p, names))
+    gain = lif_rate_gain(p.synapse_scale, p.tpres)
+    assert q.layer_scales["conv2"]["bias_scale"] == bias_scale_for_layer(2.0, 4.0)
+    # conv2 rescales the code reaching conv3, so conv3's bias_scale cannot be a free number.
+    assert q.layer_scales["conv3"]["bias_scale"] == bias_scale_for_layer(3.0, 4.0 / (gain * 2.0))

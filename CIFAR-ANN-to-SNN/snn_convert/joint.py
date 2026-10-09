@@ -25,6 +25,7 @@ from .runtime_paths import copy_arni_plugins, copy_data_files, default_workplace
 from .conversion_formulas import (
     DEFAULT_LAMBDA_PERCENTILE,
     data_norm_bias_scale,
+    propagate_bias_scales,
     data_norm_weight_scale,
 )
 from .joint_space import (
@@ -102,7 +103,7 @@ def apply_data_norm(
         ws = data_norm_weight_scale(
             lambda_in, lam_out, synapse_scale=params.synapse_scale, tpres=params.tpres
         )
-        bs = data_norm_bias_scale(lam_out)
+        bs = data_norm_bias_scale(ws, lambda_in)
         layer_scales[layer.name] = {"weight_scale": float(ws), "bias_scale": float(bs)}
         lambda_in = lam_out
     return replace(params, layer_scales=layer_scales, s=s, ncalibrationimages=0, weight_scale=1.0, bias_scale=1.0)
@@ -136,13 +137,15 @@ def evaluate_surrogate(
     return acc, mse, cosine
 
 
-def _scale_all_layers(params: ConversionParams, w_mult: float, b_mult: float) -> ConversionParams:
-    scaled = {}
-    for name, sc in params.layer_scales.items():
-        scaled[name] = {
-            "weight_scale": float(sc.get("weight_scale", params.weight_scale)) * w_mult,
-            "bias_scale": float(sc.get("bias_scale", params.bias_scale)) * b_mult,
-        }
+def _scale_all_layers(params: ConversionParams, s: float, w_mult: float) -> ConversionParams:
+    """Scale every conv weight_scale and re-derive bias_scale from the rate scale it produces.
+
+    bias_scale is not a free knob (see propagate_bias_scales), so there is no bias multiplier.
+    """
+    names = list(params.layer_scales)
+    ws = [float(params.layer_scales[n].get("weight_scale", params.weight_scale)) * w_mult for n in names]
+    bs = propagate_bias_scales(ws, s, synapse_scale=params.synapse_scale, tpres=params.tpres)
+    scaled = {n: {"weight_scale": w, "bias_scale": b} for n, w, b in zip(names, ws, bs)}
     return replace(params, layer_scales=scaled)
 
 
@@ -155,23 +158,19 @@ def fine_tune_multipliers(
 ) -> tuple[ConversionParams, float, float, list[dict]]:
     ann_val = gap_features(ann_forward_maps(graph, x_val))
     w_grid = (0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0)
-    b_grid = (0.25, 0.5, 1.0, 2.0, 4.0)
     trials: list[dict] = []
     best_params = params
     best_acc = -1.0
     best_mse = float("inf")
     for wm in w_grid:
-        for bm in b_grid:
-            cand = _scale_all_layers(params, wm, bm)
-            acc, mse, cosine = evaluate_surrogate(graph, x_val, y_val, cand, s, ann_val)
-            trials.append(
-                {"weight_mult": wm, "bias_mult": bm, "probe_acc": acc, "mse": mse, "cosine": cosine}
-            )
-            # Prefer linear-probe acc on train-val (not test); MSE as tie-breaker.
-            if acc > best_acc + 1e-6 or (abs(acc - best_acc) <= 1e-6 and mse < best_mse):
-                best_acc = acc
-                best_mse = mse
-                best_params = cand
+        cand = _scale_all_layers(params, s, wm)
+        acc, mse, cosine = evaluate_surrogate(graph, x_val, y_val, cand, s, ann_val)
+        trials.append({"weight_mult": wm, "probe_acc": acc, "mse": mse, "cosine": cosine})
+        # Prefer linear-probe acc on train-val (not test); MSE as tie-breaker.
+        if acc > best_acc + 1e-6 or (abs(acc - best_acc) <= 1e-6 and mse < best_mse):
+            best_acc = acc
+            best_mse = mse
+            best_params = cand
     return best_params, best_acc, best_mse, trials
 
 
@@ -203,7 +202,7 @@ def optimize_joint(
     best = max(trials, key=lambda t: (t["probe_acc"], -t["mse"])) if trials else {}
     print(
         f"joint: surrogate probe acc={acc:.4f} mse={mse:.4g} "
-        f"w_mult={best.get('weight_mult')} b_mult={best.get('bias_mult')} (train-val, not test)"
+        f"w_mult={best.get('weight_mult')} (train-val, not test)"
     )
     return JointSearchResult(
         params=tuned,

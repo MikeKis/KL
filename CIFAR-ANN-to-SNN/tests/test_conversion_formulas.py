@@ -1,7 +1,10 @@
 # Spec: 2026-09-10_ann-to-arni-snn.md
 from __future__ import annotations
 
+import pytest
+
 from snn_convert.conversion_formulas import (
+    bias_scale_for_layer,
     bias_to_lif_property,
     data_norm_bias_scale,
     data_norm_weight_scale,
@@ -23,19 +26,22 @@ def test_pool_synapse_stays_at_or_below_threshold():
     assert pool_synapse_millivals(0.0) == 1
 
 
-def test_positive_bias_is_stoch_stim():
-    kind, val = bias_to_lif_property(0.4, bias_scale=1.0)
-    assert kind == "stochastic_stimulation"
+def test_bias_of_either_sign_is_one_constant_current():
+    """Both signs take the same path and the threshold is never touched."""
+    kind, val = bias_to_lif_property(0.4, bias_scale=2.0)
+    assert kind == "constant_stimulation"
     assert abs(val - 0.8) < 1e-12
+    kind_neg, val_neg = bias_to_lif_property(-0.3, bias_scale=2.0)
+    assert kind_neg == "constant_stimulation"
+    assert abs(val_neg + 0.6) < 1e-12
 
 
-def test_negative_bias_is_threshold_excess():
-    kind, val = bias_to_lif_property(-0.3, bias_scale=1.0, chartime=10)
-    assert kind == "threshold_excess"
-    assert abs(val - 3.0) < 1e-12
-    kind5, val5 = bias_to_lif_property(-0.3, bias_scale=1.0, chartime=5)
-    assert kind5 == "threshold_excess"
-    assert abs(val5 - 1.5) < 1e-12
+def test_bias_scale_is_weight_scale_over_input_saturation():
+    """The ratio that puts the ReLU knee of every filter in the right place."""
+    assert abs(bias_scale_for_layer(27.6628, 2.1104) - 13.1079) < 1e-4
+    assert abs(bias_scale_for_layer(7.0349, 1.0237) - 6.8720) < 1e-4
+    with pytest.raises(ValueError):
+        bias_scale_for_layer(1.0, 0.0)
 
 
 def test_lif_rate_gain_is_synapse_scale_tpres_over_threshold():
@@ -69,4 +75,7 @@ def test_data_norm_weight_and_bias():
     gain = lif_rate_gain()
     ws = data_norm_weight_scale(2.0, 4.0)
     assert abs(ws - (2.0 / 4.0) / gain) < 1e-12
-    assert abs(data_norm_bias_scale(4.0) - 0.25) < 1e-12
+    # Data-norm obeys the same bias rule; relative to the surrogate's own gain this is 1/λ_out.
+    bs = data_norm_bias_scale(ws, 2.0)
+    assert abs(bs - ws / 2.0) < 1e-12
+    assert abs(gain * bs - 1.0 / 4.0) < 1e-12

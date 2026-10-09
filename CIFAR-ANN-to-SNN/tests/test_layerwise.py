@@ -251,7 +251,6 @@ def test_step2_trial_log_writes_evals_and_reloads(tmp_path: Path):
 
 def test_rescue_packs_saturation_and_every_converted_layer():
     from snn_convert.layerwise import (
-        CONV_BIAS_BOUNDS,
         CONV_WEIGHT_BOUNDS,
         POOL_WEIGHT_BOUNDS,
         _rescue_bounds,
@@ -263,29 +262,36 @@ def test_rescue_packs_saturation_and_every_converted_layer():
 
     frozen = {
         "gap": {"weight_scale": 3.0},
-        "conv5": {"weight_scale": 30.0, "bias_scale": 0.3},
+        "conv5": {"weight_scale": 30.0, "bias_scale": 3.0, "sat_in": 10.0},
     }
     layout = _rescue_layout(frozen)
+    # bias_scale is not a search dimension; it follows weight_scale / sat_in.
     assert _rescue_param_names(layout) == [
         "saturation",
         "gap.weight_scale",
         "conv5.weight_scale",
-        "conv5.bias_scale",
     ]
-    assert _rescue_vector(2.5, frozen, layout).tolist() == [2.5, 3.0, 30.0, 0.3]
+    assert _rescue_vector(2.5, frozen, layout).tolist() == [2.5, 3.0, 30.0]
     assert _rescue_bounds((1.0, 4.0), frozen, layout) == [
         (1.0, 4.0),
         POOL_WEIGHT_BOUNDS,
         CONV_WEIGHT_BOUNDS,
-        CONV_BIAS_BOUNDS,
     ]
-    sat, scales = _rescue_unpack([9.0, 1.0, 2.0, 0.5], frozen, layout)
+
+    # conv5 is not the current stage, so it keeps its own sat_in.
+    sat, scales = _rescue_unpack([9.0, 1.0, 2.0], frozen, layout)
     assert sat == 9.0
     assert scales == {
         "gap": {"weight_scale": 1.0},
-        "conv5": {"weight_scale": 2.0, "bias_scale": 0.5},
+        "conv5": {"weight_scale": 2.0, "bias_scale": 0.2, "sat_in": 10.0},
     }
+
+    # As the current stage it takes the leading saturation instead.
+    _sat, scales_cur = _rescue_unpack([9.0, 1.0, 2.0], frozen, layout, "conv5")
+    assert scales_cur["conv5"] == {"weight_scale": 2.0, "bias_scale": 2.0 / 9.0, "sat_in": 9.0}
+
     assert frozen["gap"]["weight_scale"] == 3.0  # caller's dict untouched
+    assert frozen["conv5"]["bias_scale"] == 3.0
 
 
 def test_rescue_runs_only_below_critical_accuracy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -293,14 +299,14 @@ def test_rescue_runs_only_below_critical_accuracy(tmp_path: Path, monkeypatch: p
 
     frozen = {
         "gap": {"weight_scale": 3.0},
-        "conv5": {"weight_scale": 30.0, "bias_scale": 0.3},
+        "conv5": {"weight_scale": 30.0, "bias_scale": 3.0, "sat_in": 10.0},
     }
     seen: list[list[str]] = []
 
     def fake_step2(**kwargs):
         seen.append(list(kwargs["param_names"]))
-        kwargs["fn_write"](np.array([5.0, 1.0, 2.0, 0.5]))
-        return np.array([5.0, 1.0, 2.0, 0.5]), 44.0, {}
+        kwargs["fn_write"](np.array([5.0, 1.0, 2.0]))
+        return np.array([5.0, 1.0, 2.0]), 44.0, {}
 
     monkeypatch.setattr(lw, "_step2_classify", fake_step2)
     written: list[tuple[float, dict]] = []
@@ -311,7 +317,7 @@ def test_rescue_runs_only_below_critical_accuracy(tmp_path: Path, monkeypatch: p
             sat=2.0,
             frozen_scales=frozen,
             step2_acc=40.0,
-            n_step2_par=3,
+            n_step2_par=2,
             out_dir=tmp_path,
             exp_dir=tmp_path / "exp",
             workplace_dir=tmp_path / "wp",
@@ -326,13 +332,15 @@ def test_rescue_runs_only_below_critical_accuracy(tmp_path: Path, monkeypatch: p
         return lw._rescue_converted_layers(**kwargs)
 
     sat, scales, acc, _meta = common()
-    assert seen == [["saturation", "gap.weight_scale", "conv5.weight_scale", "conv5.bias_scale"]]
+    assert seen == [["saturation", "gap.weight_scale", "conv5.weight_scale"]]
     assert (sat, acc) == (5.0, 44.0)
     assert scales["gap"]["weight_scale"] == 1.0
+    # conv5 is the current stage here, so bias_scale tracks the new saturation.
+    assert scales["conv5"] == {"weight_scale": 2.0, "bias_scale": 0.4, "sat_in": 5.0}
     assert written[-1] == (5.0, scales)
 
-    # A joint space no wider than step 2's is skipped: one converted layer, 3 params.
-    assert common(frozen_scales={"conv5": dict(frozen["conv5"])}, n_step2_par=3) is None
+    # A joint space no wider than step 2's is skipped: one converted layer, 2 params.
+    assert common(frozen_scales={"conv5": dict(frozen["conv5"])}, n_step2_par=2) is None
 
     # No improvement over step 2 keeps the old point and rewrites the .nnc with it.
     sat_keep, scales_keep, _acc, meta_keep = common(step2_acc=90.0)
@@ -443,7 +451,8 @@ def test_step2_classify_logs_each_arnigpu(tmp_path: Path, monkeypatch: pytest.Mo
 def test_param_counts():
     assert n_params_for_layer("AvgPool2d") == 2
     assert n_params_for_layer("AdaptiveAvgPool2d") == 2
-    assert n_params_for_layer("Conv2d") == 3
+    # Conv is 2 as well: bias_scale is derived from weight_scale, not searched.
+    assert n_params_for_layer("Conv2d") == 2
 
 
 def test_tinycifar_stage_order():

@@ -43,9 +43,9 @@ from .spike_protocol import spike_counts_from_protocol
 from .nelder_mead import nelder_mead_max
 from .nnc_builder import ConversionParams
 from .conversion_formulas import (
-    BIAS_SCALE_START,
     CONV_WEIGHT_SCALE_START,
     POOL_WEIGHT_START,
+    bias_scale_for_layer,
 )
 from .rate_code import maps_to_rows, rate_code_counts, write_activation_csv
 from .saturation import saturation_from_sparsity_ratio
@@ -76,9 +76,30 @@ class LayerwiseConfig:
 def _step2_param_names(n_par: int) -> list[str]:
     if int(n_par) <= 1:
         return ["saturation"]
-    if int(n_par) == 2:
-        return ["saturation", "weight_scale"]
-    return ["saturation", "weight_scale", "bias_scale"]
+    return ["saturation", "weight_scale"]
+
+
+def _conv_entry(weight_scale: float, sat_in: float) -> dict[str, float]:
+    """frozen_scales entry for a Conv. bias_scale is derived; sat_in is kept so that it can be
+    re-derived whenever a later stage re-tunes weight_scale."""
+    return {
+        "weight_scale": float(weight_scale),
+        "bias_scale": bias_scale_for_layer(weight_scale, sat_in),
+        "sat_in": float(sat_in),
+    }
+
+
+def _scale_entry(layer_type: str, weight_scale: float, sat_in: float) -> dict[str, float]:
+    if layer_type == "Conv2d":
+        return _conv_entry(weight_scale, sat_in)
+    return {"weight_scale": float(weight_scale)}
+
+
+def _weight_space(layer_type: str) -> tuple[float, tuple[float, float]]:
+    """Start and bounds for the single per-layer scale that follows the saturation."""
+    if layer_type == "Conv2d":
+        return CONV_WEIGHT_SCALE_START, CONV_WEIGHT_BOUNDS
+    return POOL_WEIGHT_START, POOL_WEIGHT_BOUNDS
 
 
 def _vec_key(vec) -> tuple[float, ...]:
@@ -421,12 +442,13 @@ class Step1Probe:
     n_images: int
     n_neurons: int
     timeout: float | None
+    is_conv: bool = False
     _ready: bool = False
 
     def evaluate(self, x: np.ndarray, n_par: int, target: np.ndarray) -> float:
         sat = float(x[0])
         ws = float(x[1]) if n_par > 1 else 1.0
-        bs = float(x[2]) if n_par > 2 else None
+        bs = bias_scale_for_layer(ws, sat) if self.is_conv else None
         xml = build_layer_probe_nnc(
             params=self.params,
             layer_name=self.layer_name,
@@ -521,6 +543,7 @@ def _make_step1_probe(
         n_images=int(input_nchw.shape[0]),
         n_neurons=int(target.shape[1]),
         timeout=timeout,
+        is_conv=_layer_spec(graph, layer_name).type == "Conv2d",
     )
 
 
@@ -540,38 +563,33 @@ def _jaccard_objective(
         return 0.0
 
 
-def _step1_start(values: np.ndarray, n_par: int) -> tuple[np.ndarray, dict]:
-    """One Nelder–Mead start: sparsity-ratio saturation, fixed pool/conv/bias seeds."""
+def _step1_start(values: np.ndarray, n_par: int, layer_type: str | None = None) -> tuple[np.ndarray, dict]:
+    """One Nelder–Mead start: sparsity-ratio saturation, fixed pool/conv seed."""
     sat, info = saturation_from_sparsity_ratio(values)
     if n_par <= 1:
-        x0 = np.array([sat], dtype=np.float64)
-    elif n_par == 2:
-        x0 = np.array([sat, POOL_WEIGHT_START], dtype=np.float64)
-    else:
-        x0 = np.array([sat, CONV_WEIGHT_SCALE_START, BIAS_SCALE_START], dtype=np.float64)
-    return x0, info
+        return np.array([sat], dtype=np.float64), info
+    weight_start, _ = _weight_space(str(layer_type))
+    return np.array([sat, weight_start], dtype=np.float64), info
 
 
 # ArNI weight units; the pool upper end is the threshold (8531 millivals / 1000).
 POOL_WEIGHT_BOUNDS = (0.05, 8.531)
 CONV_WEIGHT_BOUNDS = (0.25, 256.0)
-CONV_BIAS_BOUNDS = (0.01, 16.0)
 
 
-def _layer_param_bounds(n_par: int) -> list[tuple[float, float]]:
+def _layer_param_bounds(n_par: int, layer_type: str | None = None) -> list[tuple[float, float]]:
     """Bounds after the leading saturation, for one layer of n_par parameters."""
     if int(n_par) <= 1:
         return []
-    if int(n_par) == 2:
-        return [POOL_WEIGHT_BOUNDS]
-    return [CONV_WEIGHT_BOUNDS, CONV_BIAS_BOUNDS]
+    _, weight_bounds = _weight_space(str(layer_type))
+    return [weight_bounds]
 
 
-def _nm_bounds(x0: np.ndarray, n_par: int) -> list[tuple[float, float]]:
+def _nm_bounds(x0: np.ndarray, n_par: int, layer_type: str | None = None) -> list[tuple[float, float]]:
     sat = float(x0[0])
     sat_lo = max(sat * 0.05, 1e-6)
     sat_hi = max(sat * 20.0, sat_lo * 2.0)
-    return [(sat_lo, sat_hi), *_layer_param_bounds(n_par)]
+    return [(sat_lo, sat_hi), *_layer_param_bounds(n_par, layer_type)]
 
 
 def _nm_from_start(
@@ -581,8 +599,9 @@ def _nm_from_start(
     *,
     nm_iter: int,
     sat_info: dict | None = None,
+    layer_type: str | None = None,
 ) -> tuple[np.ndarray, float, dict]:
-    bounds = _nm_bounds(x0, n_par)
+    bounds = _nm_bounds(x0, n_par, layer_type)
     x_nm, f_nm, n_nm = nelder_mead_max(fn, x0, bounds, max_iter=nm_iter, step=0.2)
     meta = {
         "n_coarse": 0,
@@ -604,9 +623,10 @@ def _run_step1_nm(
     log_path: Path,
     layer: str,
     search_id: str,
+    layer_type: str | None = None,
 ) -> tuple[np.ndarray, float, dict]:
     names = _step2_param_names(n_par)
-    bounds = _nm_bounds(np.asarray(x0, dtype=np.float64), n_par)
+    bounds = _nm_bounds(np.asarray(x0, dtype=np.float64), n_par, layer_type)
     trial = Step1TrialLog(
         log_path,
         layer=layer,
@@ -628,7 +648,9 @@ def _run_step1_nm(
         trial.record_eval(vec, score, elapsed_s=time.perf_counter() - t0)
         return score
 
-    best_x, best_j, meta = _nm_from_start(logged, start, n_par, nm_iter=nm_iter, sat_info=sat_info)
+    best_x, best_j, meta = _nm_from_start(
+        logged, start, n_par, nm_iter=nm_iter, sat_info=sat_info, layer_type=layer_type
+    )
     trial.record_done(best_x, best_j)
     meta["log"] = str(trial.path)
     meta["best_json"] = str(trial.best_path)
@@ -780,17 +802,15 @@ def _completed_prefix(
 
 
 def _absorb_stage_params(stage: dict, frozen_scales: dict) -> float:
+    # The stage saturation is sat_in of that layer, so it also fixes its bias_scale.
     sat = float(stage.get("step2_saturation", stage["step1_saturation"]))
     n_par = int(stage.get("n_params") or 1)
     if n_par > 1:
         ws = stage.get("step2_weight_scale", stage.get("step1_weight_scale"))
         if ws is not None:
-            entry: dict[str, float] = {"weight_scale": float(ws)}
-            if n_par >= 3:
-                bs = stage.get("step2_bias_scale", stage.get("step1_bias_scale"))
-                if bs is not None:
-                    entry["bias_scale"] = float(bs)
-            frozen_scales[str(stage["layer"])] = entry
+            frozen_scales[str(stage["layer"])] = _scale_entry(
+                str(stage.get("type") or ""), float(ws), sat
+            )
     return sat
 
 
@@ -829,10 +849,7 @@ def _step1_vec(stage: dict, n_par: int) -> np.ndarray:
     if int(n_par) <= 1:
         return np.array([sat], dtype=np.float64)
     ws = float(stage.get("step1_weight_scale", 1.0))
-    if int(n_par) == 2:
-        return np.array([sat, ws], dtype=np.float64)
-    bs = float(stage.get("step1_bias_scale", 1.0))
-    return np.array([sat, ws, bs], dtype=np.float64)
+    return np.array([sat, ws], dtype=np.float64)
 
 
 def _best_json_vec(out_dir: Path, layer: str, n_par: int) -> np.ndarray | None:
@@ -1104,7 +1121,6 @@ def convert_layerwise(
             meta = reuse.get("step1_meta") or {}
             sat = float(best_x[0])
             ws = float(best_x[1]) if n_par > 1 else None
-            bs = float(best_x[2]) if n_par > 2 else None
             stage_log = dict(reuse)
             stage_log.update(
                 {
@@ -1118,8 +1134,7 @@ def convert_layerwise(
             )
             if n_par > 1:
                 stage_log["step1_weight_scale"] = ws
-            if n_par > 2:
-                stage_log["step1_bias_scale"] = bs
+            stage_log.pop("step1_bias_scale", None)  # derived now, never searched
             print(f"layerwise {stage_i + 1}/{len(stages)} {layer_name}: reuse step1, continue")
         else:
             target = rate_code_counts(maps_to_rows(target_maps[:n_j]), current_sat)
@@ -1148,7 +1163,7 @@ def convert_layerwise(
             def fn(vec, _ln=layer_name, _tg=target, _np=n_par, _probe=probe):
                 return _jaccard_objective(_ln, _tg, vec, _np, _probe)
 
-            x0, sat_info = _step1_start(input_j, n_par)
+            x0, sat_info = _step1_start(input_j, n_par, layer.type)
             step1_log = out_dir / f"step1_{layer_name}.jsonl"
             finished = None if cfg.fresh else _finished_step1(out_dir, layer_name, n_par)
             if finished is not None:
@@ -1165,11 +1180,11 @@ def convert_layerwise(
                     log_path=step1_log,
                     layer=layer_name,
                     search_id=str(cfg.search_id),
+                    layer_type=layer.type,
                 )
             meta["simulator"] = "arnigpu" if probe is not None else "skipped"
             sat = float(best_x[0])
             ws = float(best_x[1]) if n_par > 1 else None
-            bs = float(best_x[2]) if n_par > 2 else None
             stage_log = {
                 "layer": layer_name,
                 "type": layer.type,
@@ -1182,13 +1197,9 @@ def convert_layerwise(
             }
             if n_par > 1:
                 stage_log["step1_weight_scale"] = ws
-            if n_par > 2:
-                stage_log["step1_bias_scale"] = bs
 
-        if n_par > 2:
-            frozen_scales[layer_name] = {"weight_scale": float(ws), "bias_scale": float(bs)}
-        elif n_par > 1:
-            frozen_scales[layer_name] = {"weight_scale": float(ws)}
+        if n_par > 1:
+            frozen_scales[layer_name] = _scale_entry(layer.type, float(ws), sat)
         params = replace(params, layer_scales=dict(frozen_scales), skip_first_conv=False, s=None)
 
         slice_in = inp_step
@@ -1239,6 +1250,7 @@ def convert_layerwise(
                     ),
                     x0=best_x,
                     n_par=n_par,
+                    layer_type=layer.type,
                     sat_bounds=(max(sat * 0.25, 1e-4), sat * 4.0),
                     exp_dir=exp_dir,
                     workplace_dir=workplace_dir,
@@ -1260,12 +1272,10 @@ def convert_layerwise(
             if n_par > 1:
                 ws = float(step2_x[1])
                 stage_log["step2_weight_scale"] = ws
-                if n_par > 2:
-                    bs = float(step2_x[2])
-                    frozen_scales[layer_name] = {"weight_scale": ws, "bias_scale": bs}
-                    stage_log["step2_bias_scale"] = bs
-                else:
-                    frozen_scales[layer_name] = {"weight_scale": ws}
+                entry = _scale_entry(layer.type, ws, sat)
+                frozen_scales[layer_name] = entry
+                if "bias_scale" in entry:
+                    stage_log["step2_bias_scale"] = entry["bias_scale"]
             params = replace(params, layer_scales=dict(frozen_scales), s=None)
             _rewrite_stage(
                 graph,
@@ -1336,11 +1346,11 @@ def convert_layerwise(
                     stage_log["rescue_accuracy_pct"] = rescue_acc
                     stage_log["rescue_scales"] = {k: dict(v) for k, v in frozen_scales.items()}
                     stage_log["rescue_meta"] = rescue_meta
-                    entry = frozen_scales.get(layer_name) or {}
+                    rescued_entry = frozen_scales.get(layer_name) or {}
                     if n_par > 1:
-                        ws = float(entry.get("weight_scale", ws))
-                    if n_par > 2:
-                        bs = float(entry.get("bias_scale", bs))
+                        ws = float(rescued_entry.get("weight_scale", ws))
+                    if "bias_scale" in rescued_entry:
+                        stage_log["rescue_bias_scale"] = rescued_entry["bias_scale"]
         current_sat = sat
         stage_log["complete"] = True
         _upsert_stage(log, stage_log)
@@ -1358,7 +1368,11 @@ def convert_layerwise(
             f"layerwise {stage_i + 1}/{len(stages)} {layer_name}: "
             f"jaccard={best_j:.4f} sat={sat:.5g}"
             + (f" ws={ws:.5g}" if n_par > 1 else "")
-            + (f" bs={bs:.5g}" if n_par > 2 else "")
+            + (
+                f" bs={frozen_scales[layer_name]['bias_scale']:.5g}"
+                if "bias_scale" in (frozen_scales.get(layer_name) or {})
+                else ""
+            )
         )
 
     if last_input_step_name == first.name and fromfile_done is None:
@@ -1658,10 +1672,8 @@ def _rewrite_stage(
     sat = float(vec[0])
     scales = dict(frozen_scales)
     if n_par > 1:
-        entry: dict[str, float] = {"weight_scale": float(vec[1])}
-        if n_par > 2:
-            entry["bias_scale"] = float(vec[2])
-        scales[layer_name] = entry
+        # sat is this layer's sat_in, so bias_scale follows the candidate point.
+        scales[layer_name] = _scale_entry(_layer_spec(graph, layer_name).type, float(vec[1]), sat)
     _write_stage_nnc(
         graph,
         layer_name,
@@ -1710,14 +1722,11 @@ def _write_stage_nnc(
 
 
 def _rescue_layout(frozen_scales: dict) -> list[tuple[str, str]]:
-    """(layer, key) pairs that follow the leading saturation, in stack order."""
-    layout: list[tuple[str, str]] = []
-    for name, sc in frozen_scales.items():
-        if "weight_scale" in sc:
-            layout.append((name, "weight_scale"))
-        if "bias_scale" in sc:
-            layout.append((name, "bias_scale"))
-    return layout
+    """(layer, key) pairs that follow the leading saturation, in stack order.
+
+    bias_scale is absent on purpose: it is derived from weight_scale in _rescue_unpack.
+    """
+    return [(name, "weight_scale") for name, sc in frozen_scales.items() if "weight_scale" in sc]
 
 
 def _rescue_param_names(layout: list[tuple[str, str]]) -> list[str]:
@@ -1732,24 +1741,33 @@ def _rescue_vector(sat: float, frozen_scales: dict, layout) -> np.ndarray:
 
 
 def _rescue_bounds(sat_bounds, frozen_scales: dict, layout) -> list[tuple[float, float]]:
-    bounds = [sat_bounds]
-    for name, key in layout:
-        if key == "bias_scale":
-            bounds.append(CONV_BIAS_BOUNDS)
-        else:
-            # Only convs carry a bias_scale; pool / GAP weights are capped at the threshold.
-            bounds.append(
-                CONV_WEIGHT_BOUNDS if "bias_scale" in frozen_scales[name] else POOL_WEIGHT_BOUNDS
-            )
-    return bounds
+    # Only convs carry a bias_scale; pool / GAP weights are capped at the threshold.
+    return [
+        sat_bounds,
+        *(
+            CONV_WEIGHT_BOUNDS if "bias_scale" in frozen_scales[name] else POOL_WEIGHT_BOUNDS
+            for name, _key in layout
+        ),
+    ]
 
 
-def _rescue_unpack(vec, frozen_scales: dict, layout) -> tuple[float, dict]:
+def _rescue_unpack(
+    vec, frozen_scales: dict, layout, current_layer: str | None = None
+) -> tuple[float, dict]:
     arr = np.asarray(vec, dtype=np.float64).ravel()
+    sat = float(arr[0])
     scales = {name: dict(sc) for name, sc in frozen_scales.items()}
     for i, (name, key) in enumerate(layout, start=1):
-        scales[name][key] = float(arr[i])
-    return float(arr[0]), scales
+        sc = scales[name]
+        sc[key] = float(arr[i])
+        if "bias_scale" not in sc:
+            continue
+        # The leading saturation is sat_in of the current stage only; the layers above keep theirs.
+        sat_in = sat if name == current_layer else float(sc.get("sat_in") or 0.0)
+        if sat_in > 0.0:
+            sc["sat_in"] = sat_in
+            sc["bias_scale"] = bias_scale_for_layer(sc["weight_scale"], sat_in)
+    return sat, scales
 
 
 def _vec_from_best_json(path: Path, names: list[str]) -> np.ndarray | None:
@@ -1804,7 +1822,7 @@ def _rescue_converted_layers(
     if not fresh and _jsonl_has_done(log_path):
         done = _vec_from_best_json(Path(out_dir) / f"rescue_{layer}_best.json", names)
         if done is not None:
-            new_sat, new_scales = _rescue_unpack(done, frozen_scales, layout)
+            new_sat, new_scales = _rescue_unpack(done, frozen_scales, layout, layer)
             fn_write_scales(new_sat, new_scales)
             print(f"layerwise {layer}: reuse finished rescue")
             return new_sat, new_scales, None, {"resumed_done": True, "log": str(log_path)}
@@ -1815,7 +1833,7 @@ def _rescue_converted_layers(
     )
 
     def write(vec):
-        sat_r, scales_r = _rescue_unpack(vec, frozen_scales, layout)
+        sat_r, scales_r = _rescue_unpack(vec, frozen_scales, layout, layer)
         fn_write_scales(sat_r, scales_r)
 
     best_x, best_acc, meta = _step2_classify(
@@ -1840,7 +1858,7 @@ def _rescue_converted_layers(
         fn_write_scales(sat, frozen_scales)
         meta["kept_step2"] = True
         return sat, {name: dict(sc) for name, sc in frozen_scales.items()}, best_acc, meta
-    new_sat, new_scales = _rescue_unpack(best_x, frozen_scales, layout)
+    new_sat, new_scales = _rescue_unpack(best_x, frozen_scales, layout, layer)
     fn_write_scales(new_sat, new_scales)
     return new_sat, new_scales, best_acc, meta
 
@@ -1862,9 +1880,10 @@ def _step2_classify(
     log_path: Path,
     bounds: list[tuple[float, float]] | None = None,
     param_names: list[str] | None = None,
+    layer_type: str | None = None,
 ) -> tuple[np.ndarray, float | None, dict]:
     if bounds is None:
-        bounds = [sat_bounds, *_layer_param_bounds(n_par)]
+        bounds = [sat_bounds, *_layer_param_bounds(n_par, layer_type)]
     names = param_names if param_names is not None else _step2_param_names(n_par)
     trial_log = Step2TrialLog(
         log_path,

@@ -37,8 +37,11 @@ def snn_rate_forward(
     Approximate spike rates in [0, 1] after each population.
 
     conv1: fromFile ReLU+clip/s.
-    later Conv: rate ≈ clip(ReLU(gain * w_scale * conv(r, W) + b_scale * b), 0, 1)
+    later Conv: rate ≈ clip(ReLU(gain * (w_scale * conv(r, W) + b_scale * b)), 0, 1)
     AvgPool/GAP: average (equivalent to SumPool + 1/k²).
+
+    b_scale carries the DLL meaning (millivals per tact per unit bias, /1000), so it goes through
+    the same gain as the synaptic current - exactly as p_ConstantStimulation does in NeuLIF.
     """
     gain = lif_rate_gain(params.synapse_scale, params.tpres)
     rates: dict[str, np.ndarray] = {}
@@ -55,11 +58,10 @@ def snn_rate_forward(
                 b = graph.weights.get(f"{layer.name}.bias")
                 ws = layer_weight_scale(params, layer.name)
                 bs = layer_bias_scale(params, layer.name)
-                pre = conv2d_valid(r, w, None, stride=layer.get_int("stride", 1))
-                pre = gain * ws * pre
+                pre = ws * conv2d_valid(r, w, None, stride=layer.get_int("stride", 1))
                 if b is not None:
                     pre = pre + bs * b.reshape(1, -1, 1, 1)
-                r = np.clip(relu(pre), 0.0, 1.0)
+                r = np.clip(relu(gain * pre), 0.0, 1.0)
             rates[layer.name] = r
         elif layer.type == "AvgPool2d":
             k = layer.kernel_size()

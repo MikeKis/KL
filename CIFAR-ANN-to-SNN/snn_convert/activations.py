@@ -40,8 +40,9 @@ def input_step_for_layer(graph: AnnGraph, layer_name: str) -> SpatialStep:
 
 
 def n_params_for_layer(layer_type: str) -> int:
+    """Width of the search vector. bias_scale is derived from weight_scale, so Conv is 2 too."""
     if layer_type == "Conv2d":
-        return 3
+        return 2  # saturation + conv weight_scale
     if layer_type in {"AvgPool2d", "AdaptiveAvgPool2d"}:
         return 2  # saturation + pool synapse weight_scale
     raise ValueError(f"no conversion params for {layer_type}")

@@ -1,5 +1,5 @@
 # Spec: 2026-09-10_ann-to-arni-snn.md
-"""23-D linearized joint vector: s, per-conv scales, CoLaNET, reward."""
+"""Linearized joint vector: s, per-conv weight_scale, CoLaNET, reward."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from dataclasses import replace
 import numpy as np
 
 from .ann_graph import AnnGraph
+from .conversion_formulas import propagate_bias_scales
 from .nnc_builder import ConversionParams
 
 
@@ -26,14 +27,16 @@ def conv_scale_layer_names(graph: AnnGraph) -> list[str]:
 
 def encode_vector(params: ConversionParams, layer_names: list[str]) -> np.ndarray:
     """
-    23-D when TinyCifarNet has 4 post-fromFile convs:
-    s, 8 scales, 8 CoLaNET scalars, (b, hinge), WTA, reward, model bit.
+    18-D when TinyCifarNet has 4 post-fromFile convs:
+    s, 4 conv weight_scales, 8 CoLaNET scalars, (b, hinge), WTA, reward, model bit.
+
+    bias_scale is not in the vector: it is fixed by s and the weight_scales
+    (conversion_formulas.propagate_bias_scales) and is restored in decode_vector.
     """
     vals: list[float] = [float(params.s or 1.0)]
     for name in layer_names:
         sc = params.layer_scales.get(name) or {}
         vals.append(float(sc.get("weight_scale", params.weight_scale)))
-        vals.append(float(sc.get("bias_scale", params.bias_scale)))
     vals.extend(
         [
             float(params.stochastic_stimulation),
@@ -56,7 +59,7 @@ def encode_vector(params: ConversionParams, layer_names: list[str]) -> np.ndarra
 
 def decode_vector(base: ConversionParams, layer_names: list[str], vec: np.ndarray) -> ConversionParams:
     v = np.asarray(vec, dtype=np.float64).reshape(-1)
-    expected = 1 + 2 * len(layer_names) + 13
+    expected = 1 + len(layer_names) + 13
     if v.size != expected:
         raise ValueError(f"joint vector length {v.size} != {expected}")
     i = 0
@@ -69,9 +72,11 @@ def decode_vector(base: ConversionParams, layer_names: list[str], vec: np.ndarra
 
     s = max(0.05, take())
     layer_scales = dict(base.layer_scales)
-    for name in layer_names:
-        ws = max(1e-4, take())
-        bs = max(1e-4, take())
+    weight_scales = [max(1e-4, take()) for _ in layer_names]
+    bias_scales = propagate_bias_scales(
+        weight_scales, s, synapse_scale=base.synapse_scale, tpres=base.tpres
+    )
+    for name, ws, bs in zip(layer_names, weight_scales, bias_scales):
         layer_scales[name] = {"weight_scale": ws, "bias_scale": bs}
     stoch = max(1e-4, take())
     hebb = min(0.0, take())
@@ -115,7 +120,7 @@ def decode_vector(base: ConversionParams, layer_names: list[str], vec: np.ndarra
 def perturb_vector(vec: np.ndarray, rng: np.random.Generator, *, n_layers: int, scale: float = 0.35) -> np.ndarray:
     """Log-normal on positive scales; additive on signed; round ints; rare model flip."""
     out = np.array(vec, dtype=np.float64, copy=True)
-    n_scale = 1 + 2 * n_layers  # s + per-layer ws/bs
+    n_scale = 1 + n_layers  # s + per-conv weight_scale
     # s and layer scales
     out[:n_scale] *= np.exp(rng.normal(0.0, scale, size=n_scale))
     i = n_scale
@@ -144,7 +149,7 @@ def perturb_vector(vec: np.ndarray, rng: np.random.Generator, *, n_layers: int, 
     i += 1
     out[i] *= np.exp(rng.normal(0.0, scale))  # reward
     i += 1
-    out[i] = 1.0  # linearized 23-D: freeze model bit
+    out[i] = 1.0  # linearized: freeze model bit
     return out
 
 
@@ -166,6 +171,6 @@ def vector_as_dict(params: ConversionParams, layer_names: list[str]) -> dict:
         "reward_weight": params.reward_weight,
         "layer_scales": params.layer_scales,
     }
-    d["n_dim"] = 1 + 2 * len(layer_names) + 13
+    d["n_dim"] = 1 + len(layer_names) + 13
     d["layer_names"] = layer_names
     return d
