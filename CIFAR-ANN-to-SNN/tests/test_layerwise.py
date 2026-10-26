@@ -604,6 +604,40 @@ def test_layerwise_gap_stage_writes_nnc(tmp_path: Path):
     assert log["stages"][0].get("complete") is True
 
 
+def test_resume_applies_accepted_rescue_of_completed_stage():
+    from snn_convert.layerwise import _absorb_stage_params
+
+    rescued = {
+        "gap": {"weight_scale": 1.5},
+        "conv5": {"weight_scale": 7.0, "bias_scale": 3.5, "sat_in": 2.0},
+        "pool2": {"weight_scale": 2.5},
+    }
+    stages = [
+        {"layer": "gap", "type": "AdaptiveAvgPool2d", "n_params": 2,
+         "step1_saturation": 9.0, "step2_saturation": 8.0, "step2_weight_scale": 3.0},
+        {"layer": "conv5", "type": "Conv2d", "n_params": 2,
+         "step1_saturation": 1.5, "step2_saturation": 1.4, "step2_weight_scale": 5.0},
+        {"layer": "pool2", "type": "AvgPool2d", "n_params": 2,
+         "step1_saturation": 1.1, "step2_saturation": 1.2, "step2_weight_scale": 4.0,
+         "rescue_saturation": 1.7, "rescue_scales": rescued},
+        {"layer": "conv4", "type": "Conv2d", "n_params": 2,
+         "step1_saturation": 2.0, "step2_saturation": 2.5, "step2_weight_scale": 10.0},
+    ]
+    frozen: dict = {}
+    sats = [_absorb_stage_params(st, frozen) for st in stages]
+
+    # pool2's rescue replaces every layer converted so far and its saturation.
+    assert sats[2] == 1.7
+    assert frozen["gap"] == {"weight_scale": 1.5}
+    assert frozen["conv5"] == rescued["conv5"]
+    assert frozen["pool2"] == {"weight_scale": 2.5}
+    # A later stage only overrides its own entry, as during the original run.
+    assert sats[3] == 2.5
+    assert frozen["conv4"]["weight_scale"] == 10.0
+    assert frozen["conv4"]["sat_in"] == 2.5
+    assert list(frozen) == ["gap", "conv5", "pool2", "conv4"]
+
+
 def test_layerwise_fresh_reruns_finished_step2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     arch = tmp_path / "architecture.json"
     dump = tmp_path / "weights_dump.txt"

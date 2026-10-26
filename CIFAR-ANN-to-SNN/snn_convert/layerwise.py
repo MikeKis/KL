@@ -819,6 +819,13 @@ def _absorb_stage_params(stage: dict, frozen_scales: dict) -> float:
             frozen_scales[str(stage["layer"])] = _scale_entry(
                 str(stage.get("type") or ""), float(ws), sat
             )
+    # A rescue at this stage re-tuned every layer converted so far; it replaces them all.
+    rescued = stage.get("rescue_scales")
+    if isinstance(rescued, dict):
+        frozen_scales.clear()
+        for name, sc in rescued.items():
+            frozen_scales[str(name)] = {str(k): float(v) for k, v in dict(sc).items()}
+        sat = float(stage.get("rescue_saturation", sat))
     return sat
 
 
