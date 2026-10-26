@@ -249,6 +249,21 @@ def test_step2_trial_log_writes_evals_and_reloads(tmp_path: Path):
     assert resumed.cached_accuracy([2.5]) == 41.2
 
 
+def test_step1_start_saturation_is_at_least_one():
+    from snn_convert.layerwise import _step1_start
+
+    rng = np.random.default_rng(0)
+    small = np.abs(rng.normal(0.0, 0.05, size=5000))
+    x0, info = _step1_start(small, 1)
+    assert x0[0] == 1.0
+    assert 0.0 < info["raised_from"] < 1.0
+
+    large = np.abs(rng.normal(0.0, 5.0, size=5000))
+    x0_large, info_large = _step1_start(large, 1)
+    assert x0_large[0] > 1.0
+    assert "raised_from" not in info_large
+
+
 def test_rescue_packs_saturation_and_every_converted_layer():
     from snn_convert.layerwise import (
         CONV_WEIGHT_BOUNDS,

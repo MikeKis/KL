@@ -563,9 +563,17 @@ def _jaccard_objective(
         return 0.0
 
 
+# Biases are weights of a constant unit input; that input is rate-coded as 1/sat,
+# which exceeds the maximum rate when sat < 1.
+MIN_STEP1_SATURATION_START = 1.0
+
+
 def _step1_start(values: np.ndarray, n_par: int, layer_type: str | None = None) -> tuple[np.ndarray, dict]:
-    """One Nelder–Mead start: sparsity-ratio saturation, fixed pool/conv seed."""
+    """One Nelder–Mead start: sparsity-ratio saturation (at least 1), fixed pool/conv seed."""
     sat, info = saturation_from_sparsity_ratio(values)
+    if sat < MIN_STEP1_SATURATION_START:
+        info = {**info, "raised_from": sat}
+        sat = MIN_STEP1_SATURATION_START
     if n_par <= 1:
         return np.array([sat], dtype=np.float64), info
     weight_start, _ = _weight_space(str(layer_type))
