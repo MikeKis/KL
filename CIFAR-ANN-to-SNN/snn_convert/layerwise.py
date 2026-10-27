@@ -1082,7 +1082,14 @@ def convert_layerwise(
                 raise ConverterError("layerwise needs CIFAR images for activations")
             from .ann_forward import load_cifar_all_hwc
 
-            frames_hwc = load_cifar_all_hwc(images_path)
+            # Bin is planar CHW. fromFile reads HWC, so keep an interleaved copy
+            # for the final image stage. Step 1 of conv2 uses these same frames.
+            frames_hwc = load_cifar_all_hwc(images_path, channel_order="chw")
+            hwc_name = "CIFAR10_hwc.bin"
+            hwc_path = out_dir / hwc_name
+            if not hwc_path.is_file() or hwc_path.stat().st_size != frames_hwc.nbytes:
+                np.ascontiguousarray(frames_hwc).tofile(hwc_path)
+            image_source = hwc_name
             if labels_path is not None and Path(labels_path).is_file():
                 labels = np.loadtxt(labels_path, dtype=np.int64)
             split_idx = np.arange(CIFAR_N_TOTAL, dtype=np.int64)

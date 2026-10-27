@@ -76,23 +76,47 @@ def relu(x: np.ndarray) -> np.ndarray:
     return np.maximum(x, 0.0)
 
 
-def load_cifar_hwc(images_path, n: int | None = None, *, train: bool = True) -> np.ndarray:
+def cifar_bytes_to_hwc(raw: np.ndarray, channel_order: str = "chw") -> np.ndarray:
+    """
+    Decode a raw CIFAR raster to NHWC uint8.
+
+    Workplace/CIFAR10.bin is planar CHW (train.py and extract_pre_fc_activations.py
+    both default to --channel-order chw). fromFile's image convolution indexes the
+    raster as (y * W + x) * C + c, so callers that feed the file to fromFile must
+    write the HWC view, not the original planes.
+    """
+    buf = np.asarray(raw, dtype=np.uint8).reshape(-1)
+    frame = 32 * 32 * 3
+    if buf.size % frame != 0:
+        raise ConverterError(f"unexpected CIFAR raster size {buf.size}")
+    n = buf.size // frame
+    order = channel_order.lower()
+    if order == "hwc":
+        return buf.reshape(n, 32, 32, 3)
+    if order == "chw":
+        return np.ascontiguousarray(buf.reshape(n, 3, 32, 32).transpose(0, 2, 3, 1))
+    raise ConverterError(f"channel_order must be hwc or chw, got {channel_order}")
+
+
+def load_cifar_hwc(
+    images_path, n: int | None = None, *, train: bool = True, channel_order: str = "chw"
+) -> np.ndarray:
     raw = np.fromfile(images_path, dtype=np.uint8)
     if raw.size != 60000 * 32 * 32 * 3:
         raise ConverterError(f"unexpected CIFAR bin size {raw.size}")
-    frames = raw.reshape(60000, 32, 32, 3)
+    frames = cifar_bytes_to_hwc(raw, channel_order)
     frames = frames[:50000] if train else frames[50000:]
     if n is not None:
         frames = frames[: int(n)]
     return frames
 
 
-def load_cifar_all_hwc(images_path) -> np.ndarray:
-    """All 60 000 CIFAR frames in file order (train then test), HWC uint8."""
+def load_cifar_all_hwc(images_path, *, channel_order: str = "chw") -> np.ndarray:
+    """All 60 000 CIFAR frames in file order (train then test), HWC uint8."""
     raw = np.fromfile(images_path, dtype=np.uint8)
     if raw.size != 60000 * 32 * 32 * 3:
         raise ConverterError(f"unexpected CIFAR bin size {raw.size}")
-    return raw.reshape(60000, 32, 32, 3)
+    return cifar_bytes_to_hwc(raw, channel_order)
 
 
 def load_cifar_labels(labels_path, n: int | None = None, *, train: bool = True) -> np.ndarray:

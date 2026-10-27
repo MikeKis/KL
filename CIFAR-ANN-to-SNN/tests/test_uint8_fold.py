@@ -22,6 +22,20 @@ def _conv2d_numpy(x, w, b):
     return y
 
 
+def test_chw_planes_decode_to_hwc_pixels():
+    from snn_convert.ann_forward import cifar_bytes_to_hwc
+
+    raw = np.zeros(2 * 3 * 32 * 32, dtype=np.uint8)
+    chw = raw.reshape(2, 3, 32, 32)
+    chw[0, 2, 5, 7] = 9
+    chw[1, 0, 1, 2] = 4
+    hwc = cifar_bytes_to_hwc(raw, "chw")
+    assert hwc.shape == (2, 32, 32, 3)
+    assert hwc[0, 5, 7, 2] == 9
+    assert hwc[1, 1, 2, 0] == 4
+    assert int(cifar_bytes_to_hwc(hwc.reshape(-1), "hwc")[0, 5, 7, 2]) == 9
+
+
 def test_uint8_fold_matches_normalized_conv():
     rng = np.random.default_rng(2)
     mean = np.array([0.4914, 0.4822, 0.4465])
