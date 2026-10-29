@@ -1086,7 +1086,9 @@ def convert_layerwise(
             # for the final image stage. Step 1 of conv2 uses these same frames.
             frames_hwc = load_cifar_all_hwc(images_path, channel_order="chw")
             hwc_name = "CIFAR10_hwc.bin"
-            hwc_path = out_dir / hwc_name
+            # ArNIGPU runs with cwd=workplace and stage copies do not include the raster.
+            hwc_path = (workplace_dir if workplace_dir is not None else out_dir) / hwc_name
+            hwc_path.parent.mkdir(parents=True, exist_ok=True)
             if not hwc_path.is_file() or hwc_path.stat().st_size != frames_hwc.nbytes:
                 np.ascontiguousarray(frames_hwc).tofile(hwc_path)
             image_source = hwc_name

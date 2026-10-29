@@ -15,6 +15,8 @@ from .rate_code import maps_to_rows, write_activation_csv
 
 
 POPULATION_TYPES = frozenset({"Conv2d", "AvgPool2d", "AdaptiveAvgPool2d"})
+FIRST_CONV_CHECK_IMAGES = 8
+FIRST_CONV_CHECK_ATOL = 1e-3
 
 
 def layerwise_stage_names(graph: AnnGraph) -> list[str]:
@@ -68,7 +70,8 @@ class LayerActivationStore:
     """
     Subset of precomputed NCHW maps (CIFAR 60k file order).
 
-    Missing first Conv2d is computed with the uint8-folded kernel (fromFile).
+    The first Conv2d map is read from its .npy when present and checked against the
+    uint8-folded kernel (fromFile); if missing, it is computed with that kernel.
     """
 
     def __init__(
@@ -100,6 +103,9 @@ class LayerActivationStore:
                     f"{path} has {mm.shape[0]} records, need index {int(self.indices.max())}"
                 )
             arr = np.asarray(mm[self.indices], dtype=np.float64)
+            del mm
+            if name == self.graph.layers[0].name:
+                self._check_first_conv(path, arr)
         elif name == self.graph.layers[0].name:
             arr = relu(first_conv_uint8_preact(self.graph, self.x_nchw_u8))
         else:
@@ -109,6 +115,17 @@ class LayerActivationStore:
             )
         self._cache[name] = arr
         return arr
+
+    def _check_first_conv(self, path: Path, arr: np.ndarray) -> None:
+        """fromFile convolves the raw raster, so the dumped first-conv map must match it."""
+        k = min(FIRST_CONV_CHECK_IMAGES, len(self.indices))
+        digital = relu(first_conv_uint8_preact(self.graph, self.x_nchw_u8[:k]))
+        diff = float(np.max(np.abs(digital - arr[:k])))
+        if diff > FIRST_CONV_CHECK_ATOL:
+            raise ConverterError(
+                f"{path} differs from the uint8-folded first conv by {diff:.3g} "
+                "(checkpoint or CIFAR channel order mismatch)"
+            )
 
 
 def dump_layer_maps(

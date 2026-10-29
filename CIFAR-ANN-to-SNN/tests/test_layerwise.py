@@ -210,6 +210,45 @@ def test_layer_activation_store_reads_npy_and_computes_first_conv(tmp_path: Path
     assert np.all(stem >= 0.0)
 
 
+def test_layer_activation_store_checks_dumped_first_conv(tmp_path: Path):
+    from snn_convert.ann_forward import first_conv_uint8_preact, relu, uint8_to_nchw
+    from snn_convert.ann_graph import ConverterError
+
+    arch = tmp_path / "architecture.json"
+    dump = tmp_path / "weights_dump.txt"
+    arch.write_text(json.dumps(SHORT_ARCH), encoding="utf-8")
+    rng = np.random.default_rng(4)
+    write_dump(
+        dump,
+        {
+            "stem.weight": rng.normal(0, 0.05, (4, 3, 3, 3)),
+            "stem.bias": rng.normal(0, 0.01, 4),
+            "block.weight": rng.normal(0, 0.05, (8, 4, 3, 3)),
+            "block.bias": rng.normal(0, 0.01, 8),
+            "head.weight": rng.normal(0, 0.05, (4, 8)),
+            "head.bias": np.zeros(4),
+        },
+    )
+    g = load_ann_graph(arch, dump)
+    frames = rng.integers(0, 256, size=(4, 16, 16, 3), dtype=np.uint8)
+    x = uint8_to_nchw(frames)
+    stem = relu(first_conv_uint8_preact(g, x)).astype(np.float32)
+    idx = np.arange(4)
+
+    good = tmp_path / "good"
+    good.mkdir()
+    np.save(good / "stem.npy", stem)
+    got = LayerActivationStore(good, idx, graph=g, x_nchw_u8=x)["stem"]
+    np.testing.assert_allclose(got, stem.astype(np.float64))
+
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    swapped = uint8_to_nchw(np.ascontiguousarray(frames.transpose(0, 2, 1, 3)))
+    np.save(bad / "stem.npy", relu(first_conv_uint8_preact(g, swapped)).astype(np.float32))
+    with pytest.raises(ConverterError, match="uint8-folded"):
+        LayerActivationStore(bad, idx, graph=g, x_nchw_u8=x)["stem"]
+
+
 def test_step2_trial_log_writes_evals_and_reloads(tmp_path: Path):
     path = tmp_path / "step2_gap.jsonl"
     log = Step2TrialLog(

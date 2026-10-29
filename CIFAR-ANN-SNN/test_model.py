@@ -42,11 +42,12 @@ def test_valid_spatial_sizes() -> None:
     assert torch.flatten(x, 1).shape == (1, 40)
 
 
-def test_named_feature_maps_skip_conv1_on_disk() -> None:
+def test_named_feature_maps_on_disk() -> None:
     model = TinyCifarNet()
     x = torch.randn(2, 3, 32, 32)
     maps = capture_named_feature_maps(model, x)
     assert set(maps) == {"conv1", "conv2", "pool1", "conv3", "conv4", "pool2", "conv5", "gap"}
+    assert maps["conv1"].shape == (2, 16, 30, 30)
     assert maps["conv2"].shape == (2, 16, 28, 28)
     assert maps["pool1"].shape == (2, 16, 14, 14)
     assert maps["conv3"].shape == (2, 32, 12, 12)
@@ -54,8 +55,7 @@ def test_named_feature_maps_skip_conv1_on_disk() -> None:
     assert maps["pool2"].shape == (2, 32, 5, 5)
     assert maps["conv5"].shape == (2, 40, 3, 3)
     assert maps["gap"].shape == (2, 40, 1, 1)
-    assert "conv1" not in SAVE_LAYERS
-    assert set(SAVE_LAYERS) == {"conv2", "pool1", "conv3", "conv4", "pool2", "conv5", "gap"}
+    assert set(SAVE_LAYERS) == set(maps)
 
 
 def test_export_arrays() -> None:
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     test_folded_param_budget()
     test_forward_shape()
     test_valid_spatial_sizes()
-    test_named_feature_maps_skip_conv1_on_disk()
+    test_named_feature_maps_on_disk()
     test_export_arrays()
     test_export_bundle_files()
     print("all tests passed")
