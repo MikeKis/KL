@@ -197,8 +197,14 @@ def copy_data_files(dest: Path, files: Sequence[Path | str | None]) -> None:
         if not src.is_file():
             continue
         dst = dest / src.name
-        if src.resolve() != dst.resolve():
-            shutil.copy2(src, dst)
+        if src.resolve() == dst.resolve():
+            continue
+        if dst.is_file():
+            s, d = src.stat(), dst.stat()
+            # copy2 keeps mtime, so an unchanged source matches its previous copy.
+            if s.st_size == d.st_size and int(s.st_mtime) == int(d.st_mtime):
+                continue
+        shutil.copy2(src, dst)
 
 
 def _plugin_search_dirs(extra: Sequence[Path] | None) -> list[Path]:

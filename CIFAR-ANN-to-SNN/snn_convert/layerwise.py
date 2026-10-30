@@ -1733,7 +1733,9 @@ def _write_stage_nnc(
     last_arch.write_text(json.dumps(spec, indent=2), encoding="utf-8")
     p.ntact_per_image = stack_period_for_slice(_slice_layers(spec), skip_first_conv=False)
     csv_name = f"{layer_name}_input.csv"
-    write_activation_csv(out_dir / csv_name, maps_to_rows(input_nchw))
+    # The stage writes this CSV once before step 2; trials only change the nnc.
+    if not (out_dir / csv_name).is_file():
+        write_activation_csv(out_dir / csv_name, maps_to_rows(input_nchw))
     xml = build_text_values_nnc(
         params=p,
         source=csv_name,
